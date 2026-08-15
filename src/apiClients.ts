@@ -921,3 +921,151 @@ export const tomorrowIoClient = {
     }
   },
 };
+
+// ────────────────────────────────────────────────────────────────────────
+// OPEN DATA — free, no-signup (or lightweight-signup) public sources.
+// Added on request as genuinely-free alternatives once Amadeus's
+// self-service portal shut down. Unlike everything above, Wikivoyage and
+// the National Weather Service need no account or key at all — only
+// OpenTripMap asks for a (free) signup.
+// ────────────────────────────────────────────────────────────────────────
+
+// Shared lat/lon lookup for the handful of cities this app's demo data
+// touches. NWS and OpenTripMap both need coordinates, not free-text city
+// names — this plays the same role the old Amadeus IATA lookup did.
+const CITY_COORDS: Record<string, { lat: number; lon: number }> = {
+  austin: { lat: 30.2672, lon: -97.7431 },
+  lisbon: { lat: 38.7223, lon: -9.1393 },
+  "new york": { lat: 40.7128, lon: -74.006 },
+  "los angeles": { lat: 34.0522, lon: -118.2437 },
+  london: { lat: 51.5072, lon: -0.1276 },
+  paris: { lat: 48.8566, lon: 2.3522 },
+  tokyo: { lat: 35.6762, lon: 139.6503 },
+  "san francisco": { lat: 37.7749, lon: -122.4194 },
+  chicago: { lat: 41.8781, lon: -87.6298 },
+  miami: { lat: 25.7617, lon: -80.1918 },
+  seattle: { lat: 47.6062, lon: -122.3321 },
+  boston: { lat: 42.3601, lon: -71.0589 },
+};
+function cityCoords(location?: string): { lat: number; lon: number } | null {
+  if (!location) return null;
+  return CITY_COORDS[location.trim().toLowerCase()] ?? null;
+}
+
+/**
+ * Wikivoyage (MediaWiki Action API). Fully open — no key, no account,
+ * no rate-limit registration. Returns a real destination-guide excerpt
+ * for whatever city/place title is passed in (MediaWiki resolves
+ * redirects, e.g. "Austin" → "Austin (Texas)" automatically).
+ */
+export const wikivoyageClient = {
+  name: "Wikivoyage (MediaWiki Action API) — no key required",
+  configured: true,
+  async getDestinationGuide(location?: string) {
+    if (!location) return { live: false, title: null as string | null, extract: null as string | null, url: null as string | null };
+    try {
+      const url = `https://en.wikivoyage.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(location)}`;
+      const res = await fetch(url, { headers: { "User-Agent": "ButlerOS/1.0 (contact: troy.evans@outlook.com)" } });
+      if (!res.ok) throw new Error(`Wikivoyage API returned ${res.status}`);
+      const data: any = await res.json();
+      const pages = data.query?.pages ?? {};
+      const page: any = Object.values(pages)[0];
+      if (!page || "missing" in page || !page.extract) {
+        return { live: false, title: null as string | null, extract: null as string | null, url: null as string | null };
+      }
+      const title = page.title as string;
+      return {
+        live: true,
+        title,
+        extract: (page.extract as string).slice(0, 800),
+        url: `https://en.wikivoyage.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+      };
+    } catch (err) {
+      logFailure("Wikivoyage", err);
+      return { live: false, title: null as string | null, extract: null as string | null, url: null as string | null };
+    }
+  },
+};
+
+/**
+ * National Weather Service (api.weather.gov). Fully open — no key, no
+ * account. US locations only (it's a US government service covering US
+ * territory), and needs a two-step call: resolve lat/lon to a forecast
+ * office + grid via /points, then fetch that grid's forecast.
+ */
+export const nwsClient = {
+  name: "National Weather Service API (api.weather.gov) — US only, no key required",
+  configured: true,
+  async getWeather(location: string) {
+    const coords = cityCoords(location);
+    if (!coords) {
+      console.log(`[apiClients] NWS: no coordinates on file for "${location}" (or non-US location) — skipping`);
+      return { location, conditions: null as string | null, tempF: null as number | null, live: false };
+    }
+    try {
+      const headers = { "User-Agent": "ButlerOS (contact: troy.evans@outlook.com)", Accept: "application/geo+json" };
+      const pointsRes = await fetch(`https://api.weather.gov/points/${coords.lat},${coords.lon}`, { headers });
+      if (!pointsRes.ok) throw new Error(`NWS points endpoint returned ${pointsRes.status}`);
+      const pointsData: any = await pointsRes.json();
+      const forecastUrl = pointsData.properties?.forecast;
+      if (!forecastUrl) throw new Error("NWS points response missing forecast URL");
+      const forecastRes = await fetch(forecastUrl, { headers });
+      if (!forecastRes.ok) throw new Error(`NWS forecast endpoint returned ${forecastRes.status}`);
+      const forecastData: any = await forecastRes.json();
+      const period = forecastData.properties?.periods?.[0];
+      if (!period) throw new Error("NWS forecast response missing periods");
+      return {
+        location,
+        conditions: (period.shortForecast as string) ?? "unknown",
+        tempF: typeof period.temperature === "number" ? period.temperature : null,
+        live: true,
+      };
+    } catch (err) {
+      logFailure("National Weather Service", err);
+      return { location, conditions: null as string | null, tempF: null as number | null, live: false };
+    }
+  },
+};
+
+/**
+ * OpenTripMap. Free tier, but does require a lightweight signup for a
+ * key (opentripmap.io) — the one exception in this "open data" group.
+ * Used as a third attraction/experience source alongside TripAdvisor and
+ * Google Places.
+ */
+export const openTripMapClient = {
+  name: "OpenTripMap API",
+  configured: hasKeys(config.openData.openTripMapKey),
+  async searchAttractions(params: { location?: string; budget?: number }) {
+    if (!this.configured) {
+      warnIfUnconfigured("OpenTripMap", config.openData.openTripMapKey);
+      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string; url?: string }[] };
+    }
+    const coords = cityCoords(params.location);
+    if (!coords) {
+      console.log(`[apiClients] OpenTripMap: no coordinates on file for "${params.location}", skipping real call`);
+      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string; url?: string }[] };
+    }
+    try {
+      const url = `https://api.opentripmap.com/0.1/en/places/radius?radius=8000&lon=${coords.lon}&lat=${coords.lat}&kinds=interesting_places&rate=2&format=json&limit=8&apikey=${config.openData.openTripMapKey}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`OpenTripMap API returned ${res.status}`);
+      const data: any = await res.json();
+      const items = (Array.isArray(data) ? data : [])
+        .filter((p: any) => !!p.name)
+        .slice(0, 5)
+        .map((p: any) => ({
+          id: p.xid as string,
+          provider: "opentripmap",
+          title: p.name as string,
+          price: params.budget ?? 30,
+          currency: "USD",
+          url: p.xid ? `https://opentripmap.com/en/card/${p.xid}` : undefined,
+        }));
+      return { live: true, items };
+    } catch (err) {
+      logFailure("OpenTripMap", err);
+      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string; url?: string }[] };
+    }
+  },
+};

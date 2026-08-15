@@ -84,6 +84,14 @@ export const config = {
     googleMapsKey: env("GOOGLE_MAPS_KEY"),
     tomorrowioKey: env("TOMORROWIO_KEY"),
   },
+
+  // Free / no-signup-required sources — see apiClients.ts for details.
+  openData: {
+    // OpenTripMap is the one exception in this group: it's free but does
+    // require a lightweight signup for a key. Wikivoyage and the National
+    // Weather Service need no key/account at all.
+    openTripMapKey: env("OPENTRIPMAP_KEY"),
+  },
 };
 
 /** True when an integration's key(s) are all present — used by modules to log/branch. */

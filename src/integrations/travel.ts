@@ -1,4 +1,13 @@
-import { amadeusClient, expediaClient, bookingClient, airbnbClient, tripAdvisorClient, googlePlacesClient } from "../apiClients";
+import {
+  amadeusClient,
+  expediaClient,
+  bookingClient,
+  airbnbClient,
+  tripAdvisorClient,
+  googlePlacesClient,
+  openTripMapClient,
+  wikivoyageClient,
+} from "../apiClients";
 import { TravelOption } from "../types";
 
 /**
@@ -59,13 +68,31 @@ export async function searchStays(params: SearchStaysParams): Promise<TravelOpti
 export async function searchExperiences(params: SearchExperiencesParams): Promise<TravelOption[]> {
   const location = params.location ?? "Unknown";
 
-  const [places, tripadvisor] = await Promise.all([
+  const [places, tripadvisor, openTripMap] = await Promise.all([
     googlePlacesClient.searchPlaces({ location: params.location, budget: params.budget }),
     tripAdvisorClient.searchExperiences({ location: params.location, budget: params.budget }),
+    openTripMapClient.searchAttractions({ location: params.location, budget: params.budget }),
   ]);
 
   return [
     ...places.items.map((r: any) => ({ ...r, type: "experience" as const, location, live: places.live })),
     ...tripadvisor.items.map((r: any) => ({ ...r, type: "experience" as const, location, live: tripadvisor.live })),
+    ...openTripMap.items.map((r: any) => ({ ...r, type: "experience" as const, location, live: openTripMap.live })),
   ] as TravelOption[];
+}
+
+export interface DestinationGuide {
+  live: boolean;
+  title: string | null;
+  extract: string | null;
+  url: string | null;
+}
+
+/**
+ * Real destination-guide text pulled from Wikivoyage — no key required.
+ * Not part of the flights/stays/experiences capability model above since
+ * it's a different shape (one article, not a list of bookable items).
+ */
+export async function getDestinationGuide(location: string): Promise<DestinationGuide> {
+  return wikivoyageClient.getDestinationGuide(location);
 }

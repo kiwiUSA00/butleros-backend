@@ -4,7 +4,7 @@ import * as experiences from "../integrations/experiences";
 import * as travel from "../integrations/travel";
 import * as finance from "../integrations/finance";
 import * as calendar from "../integrations/calendar";
-import { openWeatherClient, tomorrowIoClient, yelpClient, ticketmasterClient } from "../apiClients";
+import { openWeatherClient, tomorrowIoClient, nwsClient, yelpClient, ticketmasterClient } from "../apiClients";
 import { integrationStatus } from "../integrationRegistry";
 import { getUser } from "../store/userStore";
 
@@ -108,17 +108,35 @@ router.get("/calendar-events/:userId", async (req, res) => {
 });
 
 // GET /butler/weather?location=Austin
-// Uses OpenWeather if WEATHER_KEY is set, falls back to Tomorrow.io, then mock data.
-// `live: true` in the response reflects whether a real API call actually
-// succeeded this request (not just whether a key is configured — a bad/expired
-// key still falls back to mock and reports live:false).
+// Tries OpenWeather (if WEATHER_KEY is set), then Tomorrow.io (if
+// TOMORROWIO_KEY is set), then the National Weather Service as a final,
+// no-key fallback (US locations only). `live: true` in the response
+// reflects whether a real API call actually succeeded this request (not
+// just whether a key is configured — a bad/expired key still falls
+// through and reports live:false for that provider).
 router.get("/weather", async (req, res) => {
   const location = (req.query.location as string) || "Austin";
-  const result = openWeatherClient.configured
-    ? await openWeatherClient.getWeather(location)
-    : await tomorrowIoClient.getWeather(location);
-  const source = !result.live ? "not_connected" : openWeatherClient.configured ? "openweather" : "tomorrow.io";
-  res.json({ ...result, source });
+
+  if (openWeatherClient.configured) {
+    const result = await openWeatherClient.getWeather(location);
+    if (result.live) return res.json({ ...result, source: "openweather" });
+  }
+  if (tomorrowIoClient.configured) {
+    const result = await tomorrowIoClient.getWeather(location);
+    if (result.live) return res.json({ ...result, source: "tomorrow.io" });
+  }
+  const nwsResult = await nwsClient.getWeather(location);
+  if (nwsResult.live) return res.json({ ...nwsResult, source: "nws" });
+
+  res.json({ ...nwsResult, source: "not_connected" });
+});
+
+// GET /butler/destination-guide?location=Austin
+// Real destination-guide excerpt from Wikivoyage — no key required.
+router.get("/destination-guide", async (req, res) => {
+  const location = (req.query.location as string) || "Austin";
+  const result = await travel.getDestinationGuide(location);
+  res.json({ location, ...result, source: result.live ? "wikivoyage" : "not_connected" });
 });
 
 // GET /butler/local?query=food&location=Austin

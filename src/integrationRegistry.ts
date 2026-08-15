@@ -21,6 +21,8 @@ export const integrationRegistry = {
     googlePlaces: clients.googlePlacesClient,
     skyscanner: clients.skyscannerClient,
     amadeus: clients.amadeusClient,
+    wikivoyage: clients.wikivoyageClient,
+    openTripMap: clients.openTripMapClient,
   },
   transportation: {
     uber: clients.uberClient,
@@ -59,6 +61,7 @@ export const integrationRegistry = {
     googleMaps: clients.googleMapsClient,
     openWeather: clients.openWeatherClient,
     tomorrowIo: clients.tomorrowIoClient,
+    nationalWeatherService: clients.nwsClient,
   },
 } as const;
 
@@ -80,6 +83,7 @@ export const travelCapabilityMethods: Record<string, { flights?: string; stays?:
   googlePlaces: { experiences: "searchPlaces" },
   skyscanner: { flights: "searchFlights" },
   amadeus: { flights: "searchFlights", stays: "searchHotels" },
+  openTripMap: { experiences: "searchAttractions" },
 };
 
 /** Shopping providers that support catalog search (vs. link-generation-only providers like Skimlinks/Target). */
@@ -89,7 +93,7 @@ export const shoppingSearchProviders = ["amazon", "rakuten", "walmart", "bestbuy
 export const defaultTravelProviders = {
   flights: ["expedia", "amadeus"],
   stays: ["booking", "expedia"],
-  experiences: ["tripadvisor", "googlePlaces"],
+  experiences: ["tripadvisor", "googlePlaces", "openTripMap"],
 };
 
 /** Flat map of every service name -> client, regardless of category. Handy for a quick lookup or a status dashboard. */
