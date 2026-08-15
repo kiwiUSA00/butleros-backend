@@ -62,6 +62,7 @@ export const integrationRegistry = {
     openWeather: clients.openWeatherClient,
     tomorrowIo: clients.tomorrowIoClient,
     nationalWeatherService: clients.nwsClient,
+    openMeteo: clients.openMeteoClient,
   },
 } as const;
 

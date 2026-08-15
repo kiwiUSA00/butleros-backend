@@ -148,38 +148,91 @@ export const tripAdvisorClient = {
   },
 };
 
+type PlaceItem = {
+  id: string;
+  provider: string;
+  title: string;
+  price: number;
+  currency: string;
+  url?: string;
+  photoName?: string;
+  rating?: number;
+  userRatingCount?: number;
+  address?: string;
+  description?: string;
+};
+
 export const googlePlacesClient = {
   name: "Google Places API",
   configured: hasKeys(config.travel.googlePlacesKey),
-  async searchPlaces(params: { query?: string; location?: string; budget?: number }) {
+  /**
+   * Real Google Places (New) text search. Requests a wide field mask so
+   * every card the frontend renders can show a genuine photo, rating,
+   * address and short description instead of a bare title — and pages
+   * through up to 20 real results at a time via `pageToken`, so category
+   * pages can offer "Load more" instead of being capped at a handful of
+   * items.
+   */
+  async searchPlaces(params: { query?: string; location?: string; budget?: number; pageToken?: string }) {
     if (!this.configured) {
       warnIfUnconfigured("Google Places", config.travel.googlePlacesKey);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
+      return { live: false, items: [] as PlaceItem[], nextPageToken: null as string | null };
     }
     try {
+      const body: Record<string, unknown> = { pageSize: 20 };
+      if (params.pageToken) {
+        body.pageToken = params.pageToken;
+      } else {
+        body.textQuery = `${params.query ?? "things to do"} in ${params.location ?? ""}`;
+      }
       const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": config.travel.googlePlacesKey,
-          "X-Goog-FieldMask": "places.id,places.displayName,places.rating,places.googleMapsUri",
+          "X-Goog-FieldMask":
+            "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.editorialSummary,places.photos,nextPageToken",
         },
-        body: JSON.stringify({ textQuery: `${params.query ?? "things to do"} in ${params.location ?? ""}` }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`Google Places API returned ${res.status}`);
       const data: any = await res.json();
-      const items = (data.places ?? []).slice(0, 3).map((p: any) => ({
+      const items: PlaceItem[] = (data.places ?? []).map((p: any) => ({
         id: p.id,
         provider: "google_places",
         title: p.displayName?.text ?? "Place",
         price: params.budget ?? 60,
         currency: "USD",
         url: p.googleMapsUri as string | undefined,
+        photoName: p.photos?.[0]?.name as string | undefined,
+        rating: typeof p.rating === "number" ? p.rating : undefined,
+        userRatingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : undefined,
+        address: p.formattedAddress as string | undefined,
+        description: p.editorialSummary?.text as string | undefined,
       }));
-      return { live: true, items };
+      return { live: true, items, nextPageToken: (data.nextPageToken as string | undefined) ?? null };
     } catch (err) {
       logFailure("Google Places", err);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
+      return { live: false, items: [] as PlaceItem[], nextPageToken: null as string | null };
+    }
+  },
+  /**
+   * Streams a real Places photo through our own backend so the frontend
+   * never needs the raw API key in an <img src>. `name` is the
+   * `places/{id}/photos/{photoId}` resource name returned by searchPlaces.
+   */
+  async fetchPhoto(name: string, maxWidthPx = "700"): Promise<{ contentType: string; buffer: Buffer } | null> {
+    if (!this.configured) return null;
+    try {
+      const url = `https://places.googleapis.com/v1/${name}/media?maxWidthPx=${encodeURIComponent(maxWidthPx)}&key=${config.travel.googlePlacesKey}`;
+      const res = await fetch(url, { redirect: "follow" });
+      if (!res.ok) throw new Error(`Google Places photo endpoint returned ${res.status}`);
+      const contentType = res.headers.get("content-type") ?? "image/jpeg";
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return { contentType, buffer };
+    } catch (err) {
+      logFailure("Google Places photo", err);
+      return null;
     }
   },
 };
@@ -930,10 +983,11 @@ export const tomorrowIoClient = {
 // OpenTripMap asks for a (free) signup.
 // ────────────────────────────────────────────────────────────────────────
 
-// Shared lat/lon lookup for the handful of cities this app's demo data
-// touches. NWS and OpenTripMap both need coordinates, not free-text city
-// names — this plays the same role the old Amadeus IATA lookup did.
-const CITY_COORDS: Record<string, { lat: number; lon: number }> = {
+// A small fast-path cache for cities this app's demo data touches most —
+// checked before hitting Nominatim so common lookups skip the network
+// round-trip. Anything not in here still resolves live, for any place
+// name, via nominatimClient.geocode() below.
+const CITY_COORDS_CACHE: Record<string, { lat: number; lon: number }> = {
   austin: { lat: 30.2672, lon: -97.7431 },
   lisbon: { lat: 38.7223, lon: -9.1393 },
   "new york": { lat: 40.7128, lon: -74.006 },
@@ -947,9 +1001,42 @@ const CITY_COORDS: Record<string, { lat: number; lon: number }> = {
   seattle: { lat: 47.6062, lon: -122.3321 },
   boston: { lat: 42.3601, lon: -71.0589 },
 };
-function cityCoords(location?: string): { lat: number; lon: number } | null {
-  if (!location) return null;
-  return CITY_COORDS[location.trim().toLowerCase()] ?? null;
+
+/**
+ * OpenStreetMap Nominatim — free, open geocoding with no key or account.
+ * Turns any place name into lat/lon, which is what unlocks NWS and
+ * OpenTripMap (both coordinate-based) for arbitrary cities the user
+ * types into the app, not just the handful hardcoded above. Nominatim's
+ * usage policy asks for a descriptive User-Agent and no more than ~1
+ * request/sec, which the small in-memory cache here helps respect.
+ */
+export const nominatimClient = {
+  name: "OpenStreetMap Nominatim (geocoding) — no key required",
+  configured: true,
+  async geocode(location?: string): Promise<{ lat: number; lon: number } | null> {
+    if (!location) return null;
+    const key = location.trim().toLowerCase();
+    if (CITY_COORDS_CACHE[key]) return CITY_COORDS_CACHE[key];
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`;
+      const res = await fetch(url, { headers: { "User-Agent": "ButlerOS/1.0 (contact: troy.evans@outlook.com)" } });
+      if (!res.ok) throw new Error(`Nominatim API returned ${res.status}`);
+      const data: any = await res.json();
+      const hit = Array.isArray(data) ? data[0] : null;
+      if (!hit) return null;
+      const coords = { lat: parseFloat(hit.lat), lon: parseFloat(hit.lon) };
+      if (Number.isNaN(coords.lat) || Number.isNaN(coords.lon)) return null;
+      CITY_COORDS_CACHE[key] = coords; // cache for the life of this process
+      return coords;
+    } catch (err) {
+      logFailure("Nominatim", err);
+      return null;
+    }
+  },
+};
+
+async function cityCoords(location?: string): Promise<{ lat: number; lon: number } | null> {
+  return nominatimClient.geocode(location);
 }
 
 /**
@@ -997,9 +1084,9 @@ export const nwsClient = {
   name: "National Weather Service API (api.weather.gov) — US only, no key required",
   configured: true,
   async getWeather(location: string) {
-    const coords = cityCoords(location);
+    const coords = await cityCoords(location);
     if (!coords) {
-      console.log(`[apiClients] NWS: no coordinates on file for "${location}" (or non-US location) — skipping`);
+      console.log(`[apiClients] NWS: could not geocode "${location}" (or non-US location) — skipping`);
       return { location, conditions: null as string | null, tempF: null as number | null, live: false };
     }
     try {
@@ -1041,9 +1128,9 @@ export const openTripMapClient = {
       warnIfUnconfigured("OpenTripMap", config.openData.openTripMapKey);
       return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string; url?: string }[] };
     }
-    const coords = cityCoords(params.location);
+    const coords = await cityCoords(params.location);
     if (!coords) {
-      console.log(`[apiClients] OpenTripMap: no coordinates on file for "${params.location}", skipping real call`);
+      console.log(`[apiClients] OpenTripMap: could not geocode "${params.location}", skipping real call`);
       return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string; url?: string }[] };
     }
     try {
@@ -1066,6 +1153,53 @@ export const openTripMapClient = {
     } catch (err) {
       logFailure("OpenTripMap", err);
       return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string; url?: string }[] };
+    }
+  },
+};
+
+// WMO weather codes (used by Open-Meteo) mapped to short human descriptions.
+const WMO_CODES: Record<number, string> = {
+  0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+  45: "Fog", 48: "Depositing rime fog",
+  51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
+  61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+  71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
+  80: "Rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
+  95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Thunderstorm with heavy hail",
+};
+
+/**
+ * Open-Meteo — free, no-key global weather. Unlike the National Weather
+ * Service (US-only), this covers any city Nominatim can geocode, so it's
+ * used as the final fallback after OpenWeather/Tomorrow.io/NWS for
+ * international locations.
+ */
+export const openMeteoClient = {
+  name: "Open-Meteo (global weather) — no key required",
+  configured: true,
+  async getWeather(location: string) {
+    const coords = await cityCoords(location);
+    if (!coords) {
+      console.log(`[apiClients] Open-Meteo: could not geocode "${location}" — skipping`);
+      return { location, conditions: null as string | null, tempF: null as number | null, live: false };
+    }
+    try {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Open-Meteo API returned ${res.status}`);
+      const data: any = await res.json();
+      const current = data.current;
+      if (!current) throw new Error("Open-Meteo response missing current conditions");
+      const code = current.weather_code as number;
+      return {
+        location,
+        conditions: WMO_CODES[code] ?? "unknown",
+        tempF: typeof current.temperature_2m === "number" ? Math.round(current.temperature_2m) : null,
+        live: true,
+      };
+    } catch (err) {
+      logFailure("Open-Meteo", err);
+      return { location, conditions: null as string | null, tempF: null as number | null, live: false };
     }
   },
 };

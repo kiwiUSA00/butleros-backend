@@ -4,7 +4,7 @@ import * as experiences from "../integrations/experiences";
 import * as travel from "../integrations/travel";
 import * as finance from "../integrations/finance";
 import * as calendar from "../integrations/calendar";
-import { openWeatherClient, tomorrowIoClient, nwsClient, yelpClient, ticketmasterClient, googlePlacesClient } from "../apiClients";
+import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, googlePlacesClient } from "../apiClients";
 import { integrationStatus } from "../integrationRegistry";
 import { getUser } from "../store/userStore";
 
@@ -128,7 +128,11 @@ router.get("/weather", async (req, res) => {
   const nwsResult = await nwsClient.getWeather(location);
   if (nwsResult.live) return res.json({ ...nwsResult, source: "nws" });
 
-  res.json({ ...nwsResult, source: "not_connected" });
+  // Open-Meteo covers international locations NWS can't (no key needed).
+  const openMeteoResult = await openMeteoClient.getWeather(location);
+  if (openMeteoResult.live) return res.json({ ...openMeteoResult, source: "open-meteo" });
+
+  res.json({ ...openMeteoResult, source: "not_connected" });
 });
 
 // GET /butler/destination-guide?location=Austin
@@ -147,15 +151,34 @@ router.get("/local", async (req, res) => {
   res.json({ query, location, results, live, source: live ? "yelp" : "not_connected" });
 });
 
-// GET /butler/places?query=restaurants&location=Austin
+// GET /butler/places?query=restaurants&location=Austin&pageToken=...
 // Real Google Places (New) text search — used to give each category page
 // (Lifestyle/Travel/Dining/Wellness) its own genuinely different, live
-// content for whatever location the user is currently exploring.
+// content for whatever location the user is currently exploring. Each item
+// includes a real photo, rating, address, and description where Google has
+// one. Pass the previous response's `nextPageToken` back as `pageToken` to
+// page through further real results ("Load more") instead of being capped.
 router.get("/places", async (req, res) => {
   const query = (req.query.query as string) || "things to do";
   const location = (req.query.location as string) || "Austin";
-  const { live, items } = await googlePlacesClient.searchPlaces({ query, location });
-  res.json({ query, location, items, live, source: live ? "google_places" : "not_connected" });
+  const pageToken = (req.query.pageToken as string) || undefined;
+  const { live, items, nextPageToken } = await googlePlacesClient.searchPlaces({ query, location, pageToken });
+  res.json({ query, location, items, live, nextPageToken: nextPageToken ?? null, source: live ? "google_places" : "not_connected" });
+});
+
+// GET /butler/photo?name=places/XXXX/photos/YYYY&w=700
+// Streams a real Google Places photo through our own backend so the
+// frontend never needs the raw Places API key in an <img> src. `name` is
+// the photo resource name returned in each place item from /butler/places.
+router.get("/photo", async (req, res) => {
+  const name = req.query.name as string;
+  if (!name) return res.status(400).end();
+  const width = (req.query.w as string) || "700";
+  const photo = await googlePlacesClient.fetchPhoto(name, width);
+  if (!photo) return res.status(404).end();
+  res.setHeader("Content-Type", photo.contentType);
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(photo.buffer);
 });
 
 // GET /butler/events?location=Austin
