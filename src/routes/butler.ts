@@ -4,7 +4,7 @@ import * as experiences from "../integrations/experiences";
 import * as travel from "../integrations/travel";
 import * as finance from "../integrations/finance";
 import * as calendar from "../integrations/calendar";
-import { openWeatherClient, tomorrowIoClient, nwsClient, yelpClient, ticketmasterClient } from "../apiClients";
+import { openWeatherClient, tomorrowIoClient, nwsClient, yelpClient, ticketmasterClient, googlePlacesClient } from "../apiClients";
 import { integrationStatus } from "../integrationRegistry";
 import { getUser } from "../store/userStore";
 
@@ -145,6 +145,17 @@ router.get("/local", async (req, res) => {
   const location = (req.query.location as string) || "Austin";
   const { live, results } = await yelpClient.getRatings(query, location);
   res.json({ query, location, results, live, source: live ? "yelp" : "not_connected" });
+});
+
+// GET /butler/places?query=restaurants&location=Austin
+// Real Google Places (New) text search — used to give each category page
+// (Lifestyle/Travel/Dining/Wellness) its own genuinely different, live
+// content for whatever location the user is currently exploring.
+router.get("/places", async (req, res) => {
+  const query = (req.query.query as string) || "things to do";
+  const location = (req.query.location as string) || "Austin";
+  const { live, items } = await googlePlacesClient.searchPlaces({ query, location });
+  res.json({ query, location, items, live, source: live ? "google_places" : "not_connected" });
 });
 
 // GET /butler/events?location=Austin
