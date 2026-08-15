@@ -4,7 +4,7 @@ import * as experiences from "../integrations/experiences";
 import * as travel from "../integrations/travel";
 import * as finance from "../integrations/finance";
 import * as calendar from "../integrations/calendar";
-import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, googlePlacesClient } from "../apiClients";
+import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, googlePlacesClient, nominatimClient } from "../apiClients";
 import { integrationStatus } from "../integrationRegistry";
 import { getUser } from "../store/userStore";
 
@@ -186,6 +186,16 @@ router.get("/events", async (req, res) => {
   const location = (req.query.location as string) || "Austin";
   const { live, events } = await ticketmasterClient.findEvents({ location });
   res.json({ location, events, live, source: live ? "ticketmaster" : "not_connected" });
+});
+
+// GET /butler/geocode?location=Austin
+// Real coordinates via OpenStreetMap Nominatim (no key) — used to center
+// the embedded map on a listing's detail page.
+router.get("/geocode", async (req, res) => {
+  const location = req.query.location as string;
+  if (!location) return res.status(400).json({ error: "location is required" });
+  const coords = await nominatimClient.geocode(location);
+  res.json({ location, lat: coords ? coords.lat : null, lon: coords ? coords.lon : null, live: !!coords });
 });
 
 // GET /butler/integrations
