@@ -47,26 +47,11 @@ function base64url(input: Buffer | string): string {
   return buf.toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
-// A small IATA lookup for the handful of cities this demo app uses. Amadeus'
-// flight/hotel search needs real airport/city codes, not free-text names.
-const IATA_CODES: Record<string, string> = {
-  austin: "AUS",
-  lisbon: "LIS",
-  "new york": "NYC",
-  "los angeles": "LAX",
-  london: "LON",
-  paris: "PAR",
-  tokyo: "TYO",
-  "san francisco": "SFO",
-  chicago: "CHI",
-  miami: "MIA",
-  seattle: "SEA",
-  boston: "BOS",
-};
-function toIata(city?: string): string | null {
-  if (!city) return null;
-  return IATA_CODES[city.trim().toLowerCase()] ?? null;
-}
+// NOTE: the IATA city/airport lookup that used to live here was only ever
+// needed by Amadeus (flight/hotel search requires real airport codes, not
+// free-text city names). Amadeus's self-service portal shut down
+// 2026-07-17 (see amadeusClient below), so that lookup was removed along
+// with the real API calls it supported.
 
 // ────────────────────────────────────────────────────────────────────────
 // TRAVEL
@@ -199,97 +184,22 @@ export const googlePlacesClient = {
   },
 };
 
-let amadeusTokenCache: { token: string; expiresAt: number } | null = null;
-async function getAmadeusToken(): Promise<string> {
-  if (amadeusTokenCache && Date.now() < amadeusTokenCache.expiresAt) return amadeusTokenCache.token;
-  const res = await fetch("https://test.api.amadeus.com/v1/security/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: config.travel.amadeusClientId,
-      client_secret: config.travel.amadeusClientSecret,
-    }),
-  });
-  if (!res.ok) throw new Error(`Amadeus OAuth2 token request failed: ${res.status}`);
-  const data: any = await res.json();
-  amadeusTokenCache = { token: data.access_token, expiresAt: Date.now() + Math.max(0, (data.expires_in ?? 1800) - 30) * 1000 };
-  return amadeusTokenCache.token;
-}
-
+// Amadeus shut down its self-service API portal on 2026-07-17: new
+// registrations were paused ahead of that date and existing keys were
+// disabled once it hit. There is no longer a self-serve way to call these
+// APIs (only the separately-contracted Amadeus Enterprise portal still
+// works, which is out of scope here) — so, like Expedia/Booking/Skyscanner,
+// this client is now permanently gated regardless of what's in AMADEUS_*.
 export const amadeusClient = {
-  name: "Amadeus for Developers (Amadeus Travel API)",
-  configured: hasKeys(config.travel.amadeusClientId, config.travel.amadeusClientSecret),
-  async searchFlights(params: { origin?: string; destination?: string; dates?: { start: string }; budget?: number }) {
-    if (!this.configured) {
-      warnIfUnconfigured("Amadeus", config.travel.amadeusClientId, config.travel.amadeusClientSecret);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
-    }
-    const originCode = toIata(params.origin);
-    const destCode = toIata(params.destination);
-    if (!originCode || !destCode) {
-      console.log(`[apiClients] Amadeus: no IATA code mapping for "${params.origin}" → "${params.destination}", skipping real call`);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
-    }
-    try {
-      const token = await getAmadeusToken();
-      const departureDate = params.dates?.start?.slice(0, 10) ?? new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
-      const url = `https://test.api.amadeus.com/v2/shopping/flight-offers?originLocationCode=${originCode}&destinationLocationCode=${destCode}&departureDate=${departureDate}&adults=1&max=3`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error(`Amadeus flight-offers returned ${res.status}`);
-      const data: any = await res.json();
-      const items = (data.data ?? []).map((offer: any) => ({
-        id: offer.id,
-        provider: "amadeus",
-        title: `${originCode} → ${destCode}`,
-        price: Number(offer.price?.total ?? params.budget ?? 0),
-        currency: offer.price?.currency ?? "USD",
-      }));
-      return { live: true, items };
-    } catch (err) {
-      logFailure("Amadeus", err);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
-    }
+  name: "Amadeus for Developers (Amadeus Travel API) — self-service portal shut down 2026-07-17",
+  configured: false,
+  async searchFlights(_params: { origin?: string; destination?: string; dates?: { start: string }; budget?: number }) {
+    console.log("[apiClients] Amadeus: self-service API portal was shut down 2026-07-17 — no live data available");
+    return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
   },
-  async searchHotels(params: { location?: string; budget?: number }) {
-    if (!this.configured) {
-      warnIfUnconfigured("Amadeus", config.travel.amadeusClientId, config.travel.amadeusClientSecret);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
-    }
-    const cityCode = toIata(params.location);
-    if (!cityCode) {
-      console.log(`[apiClients] Amadeus: no IATA city code mapping for "${params.location}", skipping real call`);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
-    }
-    try {
-      const token = await getAmadeusToken();
-      const hotelsRes = await fetch(
-        `https://test.api.amadeus.com/v1/reference-data/locations/hotels/by-city?cityCode=${cityCode}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!hotelsRes.ok) throw new Error(`Amadeus hotels/by-city returned ${hotelsRes.status}`);
-      const hotelsData: any = await hotelsRes.json();
-      const hotelIds = (hotelsData.data ?? []).slice(0, 3).map((h: any) => h.hotelId);
-      if (hotelIds.length === 0) return { live: true, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
-
-      const offersRes = await fetch(
-        `https://test.api.amadeus.com/v3/shopping/hotel-offers?hotelIds=${hotelIds.join(",")}&adults=1`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!offersRes.ok) throw new Error(`Amadeus hotel-offers returned ${offersRes.status}`);
-      const offersData: any = await offersRes.json();
-      const items = (offersData.data ?? []).map((h: any) => ({
-        id: h.hotel?.hotelId ?? mockId("amd-hotel"),
-        provider: "amadeus",
-        title: h.hotel?.name ?? `Hotel in ${params.location}`,
-        price: Number(h.offers?.[0]?.price?.total ?? params.budget ?? 0),
-        currency: h.offers?.[0]?.price?.currency ?? "USD",
-      }));
-      return { live: true, items };
-    } catch (err) {
-      logFailure("Amadeus", err);
-      return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
-    }
+  async searchHotels(_params: { location?: string; budget?: number }) {
+    console.log("[apiClients] Amadeus: self-service API portal was shut down 2026-07-17 — no live data available");
+    return { live: false, items: [] as { id: string; provider: string; title: string; price: number; currency: string }[] };
   },
 };
 

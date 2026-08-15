@@ -87,19 +87,11 @@ Every credential name below matches an environment variable already wired into
 - **Notes:** Applications are reviewed case-by-case (target: ~2 weeks) and require an established audience/business — this is not a quick indie-hacker signup. Unofficial data is available via third-party RapidAPI wrappers if a hard API key is needed for a prototype, but that's out-of-contract with Skyscanner and not recommended for production.
 - **Sources:** [Skyscanner Partners](https://www.partners.skyscanner.net/product/travel-api), [Getting started](https://skyscannerpartnersupport.zendesk.com/hc/en-us/sections/4524598474781-Travel-APIs-Getting-started)
 
-### Amadeus for Developers (Amadeus Travel API)
-- **Signup:** https://developers.amadeus.com/register — free self-service signup, instant test-environment keys
-- **Credentials:** API key (client ID) + API secret
-- **Env vars:** `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET`
-- **Auth method:** OAuth2 client-credentials grant (`POST /v1/security/oauth2/token`)
-- **Rate limits:** Test environment is free with modest quotas per API (e.g., Flight Offers Search ~10 req/sec, 2,000 req/month on the free tier); production requires a paid "move to production" step with contracted quotas
-- **Example request:**
-  ```
-  GET https://test.api.amadeus.com/v2/shopping/flight-offers?originLocationCode=AUS&destinationLocationCode=LIS&departureDate=2026-09-10&adults=1
-  Authorization: Bearer {access_token}
-  ```
-- **ButlerOS usage:** Best fit for real flight/hotel search once ready to move off mocks — the only travel API here with a genuinely free, instant, self-serve sandbox.
-- **Notes:** Recommended as the first travel API to wire up for real, given the others are partner-gated.
+### Amadeus for Developers (Amadeus Travel API) — ⚠️ SHUT DOWN 2026-07-17
+- **Status:** Amadeus closed its self-service API portal on 2026-07-17. New registrations were paused ahead of that date, and existing API keys were disabled once it hit. There is no longer any self-serve way to call these APIs — only the separately-contracted Amadeus Enterprise portal still works, which requires a direct commercial relationship with Amadeus, not a signup form.
+- **Env vars:** `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET` — still present in `.env.example` as a no-op for anyone who later gets Enterprise access, but `amadeusClient` in `src/apiClients.ts` is now hardcoded to always return `live:false` regardless of what's set.
+- **ButlerOS usage:** Previously used for real flight/hotel search in `travel.searchTrips()`. As of this shutdown it's permanently gated, in the same bucket as Expedia/Booking/Skyscanner — see those entries for why.
+- **Sources:** [PhocusWire: Amadeus to shut down self-service APIs portal](https://www.phocuswire.com/amadeus-shut-down-self-service-apis-portal-developers), [Tripgic: Amadeus Self-Service API Shutdown](https://www.tripgic.com/playbook/amadeus-api-shutdown-migration/)
 
 ---
 
@@ -397,10 +389,11 @@ Every credential name below matches an environment variable already wired into
 
 | Tier | APIs |
 |---|---|
-| **Instant, free, self-serve** | Amadeus for Developers, Plaid (sandbox), Stripe, DoorDash Drive (sandbox), Best Buy, Ticketmaster, Yelp Fusion, Google Places/Maps, OpenWeather, Tomorrow.io, TripAdvisor Content API, Google Calendar, Rakuten, Skimlinks |
+| **Instant, free, self-serve** | Plaid (sandbox), Stripe, DoorDash Drive (sandbox), Best Buy, Ticketmaster, Yelp Fusion, Google Places/Maps, OpenWeather, Tomorrow.io, TripAdvisor Content API, Google Calendar, Rakuten, Skimlinks |
 | **Self-serve but approval-gated (days–weeks)** | Instacart, TaskRabbit, Uber/Lyft (ride-booking scopes), Skyscanner, Outlook (Azure AD app review for some permissions), Eventbrite (distribution partner program) |
 | **Affiliate-network signup (Impact), no product API** | Walmart, Target |
 | **Sales/BD relationship required** | Expedia, Booking.com Demand API, Airbnb, Turo, Yodlee (production), Rocket Money, Visa Offers, Mastercard Offers |
+| **Shut down — no self-serve path left** | Amadeus for Developers (self-service portal closed 2026-07-17; only the separately-contracted Enterprise portal still works) |
 | **Migration in progress — don't build on the old one** | Amazon PA-API → use Creators API (10-sale eligibility bar either way); Postmates API → use Uber Direct |
 
-This ordering is a reasonable build sequence: wire up the instant/free tier for real first (Amadeus, Plaid, Stripe, Ticketmaster, Yelp, Google, weather APIs), keep everything else mocked, and revisit the gated/BD-required integrations once ButlerOS has traction to justify the partnership conversations.
+This ordering is a reasonable build sequence: wire up the instant/free tier for real first (Plaid, Stripe, Ticketmaster, Yelp, Google, weather APIs), keep everything else mocked, and revisit the gated/BD-required integrations once ButlerOS has traction to justify the partnership conversations. Amadeus was previously the recommended first stop for real flight/hotel search, but it's off the table now that its self-service portal is closed — TripAdvisor and Google Places are the best remaining self-serve options for travel content.
