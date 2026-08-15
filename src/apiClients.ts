@@ -179,12 +179,14 @@ export const googlePlacesClient = {
       return { live: false, items: [] as PlaceItem[], nextPageToken: null as string | null };
     }
     try {
-      const body: Record<string, unknown> = { pageSize: 20 };
-      if (params.pageToken) {
-        body.pageToken = params.pageToken;
-      } else {
-        body.textQuery = `${params.query ?? "things to do"} in ${params.location ?? ""}`;
-      }
+      // Google requires every parameter except pageSize/pageToken to stay
+      // identical across paginated requests (a changed textQuery returns
+      // INVALID_ARGUMENT) — so textQuery is always included, page after page.
+      const body: Record<string, unknown> = {
+        pageSize: 20,
+        textQuery: `${params.query ?? "things to do"} in ${params.location ?? ""}`,
+      };
+      if (params.pageToken) body.pageToken = params.pageToken;
       const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
         method: "POST",
         headers: {
