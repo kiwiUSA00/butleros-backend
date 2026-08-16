@@ -1,9 +1,25 @@
 /** Shared domain types for ButlerOS. */
 
+/** A place the user saved from a card or detail page — only ever the
+ * fields the frontend actually had on hand at save time (from a real
+ * Google Places result), never backfilled or invented. */
+export interface SavedPlace {
+  id: string;
+  title: string;
+  address?: string | null;
+  category?: string | null;
+  photoName?: string | null;
+  rating?: number | null;
+  userRatingCount?: number | null;
+  url?: string | null;
+  savedAt?: string;
+}
+
 export interface UserPreferences {
   mood?: string;
   budgetBand?: "low" | "medium" | "high";
   favoriteLocations?: string[];
+  savedPlaces?: SavedPlace[];
 }
 
 export interface User {
@@ -86,6 +102,8 @@ export interface ExperienceCard {
   rating?: number;
   userRatingCount?: number;
   address?: string;
+  /** Google's own place-type label — real fallback context when there's no editorial description. */
+  category?: string;
 }
 
 // ---- Calendar ----
