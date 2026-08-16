@@ -205,17 +205,22 @@ export const googlePlacesClient = {
       if (hasCoords) {
         const lat = params.lat as number;
         const lon = params.lon as number;
-        // A hard ~6km bounding box around the visitor's real coordinates
+        // A hard ~1.5km bounding box around the visitor's real coordinates
         // (locationRestriction only accepts a rectangle, not a circle, so
         // the radius is converted to lat/lon deltas). This *guarantees*
         // every result is genuinely near them, unlike locationBias, which
         // is only a soft nudge a stronger text signal (like a city name)
         // can override — exactly what was pulling results toward
-        // Manhattan for a Brooklyn visitor. Ranking within the box still
-        // uses Google's default RELEVANCE (rating + prominence + text
-        // match), so results stay both local and good, not just whatever
-        // happens to be literally closest.
-        const radiusMeters = 6000;
+        // Manhattan for a Brooklyn visitor. Kept tight (roughly a
+        // 15-20 minute walk) rather than a citywide-ish radius, since
+        // "close to me" should mean directly around the visitor's real
+        // location, not just the same borough. If that means fewer
+        // results in a quieter area, that's the honest real answer —
+        // never padded out with anything further away just to fill the
+        // grid. Ranking within the box still uses Google's default
+        // RELEVANCE (rating + prominence + text match), so results stay
+        // both local and good, not just whatever's literally closest.
+        const radiusMeters = 1500;
         const latDelta = radiusMeters / 111320;
         const lonDelta = radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180));
         body.locationRestriction = {
