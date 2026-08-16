@@ -26,10 +26,17 @@ import {
  * finance, scheduling). Currently a deterministic mock planner — swap the
  * body for a real LLM call (e.g. Claude) without changing the return shape.
  */
-export async function callAiButlerPlanner(user: User, overrides: Partial<ButlerPlan> = {}): Promise<ButlerPlan> {
+export async function callAiButlerPlanner(
+  user: User,
+  overrides: Partial<ButlerPlan> = {},
+  locationOverride?: string
+): Promise<ButlerPlan> {
   // TODO: replace with a real AI planning call that reasons over user
   // preferences, calendar, and finances to produce a ButlerPlan.
-  const location = user.preferences.favoriteLocations?.[0] ?? "Austin";
+  // The caller's current (IP-detected or explicitly chosen) location always
+  // wins over the saved favorite — a stale demo-profile favorite should
+  // never override where the visitor actually is right now.
+  const location = locationOverride || user.preferences.favoriteLocations?.[0] || "Austin";
   const budget =
     user.preferences.budgetBand === "high" ? 500 : user.preferences.budgetBand === "low" ? 100 : 250;
 
@@ -226,13 +233,17 @@ async function runSchedulingPlan(
  * relevant integration (in parallel across plan sections) via the dynamic
  * integrationRegistry, and assembles the combined results.
  */
-export async function runButlerCycle(userId: string, planOverrides: Partial<ButlerPlan> = {}): Promise<ButlerResults> {
+export async function runButlerCycle(
+  userId: string,
+  planOverrides: Partial<ButlerPlan> = {},
+  location?: string
+): Promise<ButlerResults> {
   const user = getUser(userId);
   if (!user) {
     throw new Error(`runButlerCycle: unknown userId ${userId}`);
   }
 
-  const aiPlan = await callAiButlerPlanner(user, planOverrides);
+  const aiPlan = await callAiButlerPlanner(user, planOverrides, location);
   const integrationsUsed: string[] = [];
 
   const [travelResults, experienceResults, transportResults, shoppingResults, financeSnapshot, schedulingResults] =
