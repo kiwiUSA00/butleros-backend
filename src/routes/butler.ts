@@ -194,20 +194,27 @@ router.get("/photo", async (req, res) => {
 // Merges two independent, genuinely public city-event sources —
 // Ticketmaster and SeatGeek — each with its own real inventory, so
 // coverage is broader than either alone (especially in markets one of
-// the two covers thinly). Same title + same calendar day is treated as
-// the same real-world event and only shown once, favoring whichever
-// source listed it first (Ticketmaster). Neither source contributing
-// still leaves an honest empty state, never fabricated listings.
+// the two covers thinly). Same title + same venue is treated as one
+// real-world event series (recurring festivals/timed-entry exhibits post
+// one listing per showtime — e.g. 24 separate rows for the same balloon
+// festival) and collapsed to just its soonest upcoming date, so a single
+// recurring show doesn't crowd out everything else in the feed; the full
+// list of dates is still one tap away via that event's real URL. Neither
+// source contributing still leaves an honest empty state, never
+// fabricated listings.
 router.get("/events", async (req, res) => {
   const location = (req.query.location as string) || "Austin";
   const [tm, sg] = await Promise.all([
     ticketmasterClient.findEvents({ location }),
     seatGeekClient.findEvents({ location }),
   ]);
-  const dedupeKey = (e: { title: string; start: string | null }) =>
-    `${e.title.toLowerCase().trim()}|${(e.start || "").slice(0, 10)}`;
+  const dedupeKey = (e: { title: string; venueName: string | null }) =>
+    `${e.title.toLowerCase().trim()}|${(e.venueName || "").toLowerCase().trim()}`;
   const seen = new Set<string>();
-  const events = [...tm.events, ...sg.events].filter((e) => {
+  const sorted = [...tm.events, ...sg.events].sort(
+    (a, b) => new Date(a.start || 0).getTime() - new Date(b.start || 0).getTime()
+  );
+  const events = sorted.filter((e) => {
     const key = dedupeKey(e);
     if (seen.has(key)) return false;
     seen.add(key);
