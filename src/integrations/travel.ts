@@ -35,6 +35,7 @@ export interface SearchExperiencesParams {
   location?: string;
   date?: string;
   budget?: number;
+  query?: string;
 }
 
 export async function searchTrips(params: SearchTripsParams): Promise<TravelOption[]> {
@@ -69,7 +70,7 @@ export async function searchExperiences(params: SearchExperiencesParams): Promis
   const location = params.location ?? "Unknown";
 
   const [places, tripadvisor, openTripMap] = await Promise.all([
-    googlePlacesClient.searchPlaces({ location: params.location, budget: params.budget }),
+    googlePlacesClient.searchPlaces({ location: params.location, budget: params.budget, query: params.query }),
     tripAdvisorClient.searchExperiences({ location: params.location, budget: params.budget }),
     openTripMapClient.searchAttractions({ location: params.location, budget: params.budget }),
   ]);
