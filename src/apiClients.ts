@@ -163,6 +163,14 @@ type PlaceItem = {
   /** Google's own place-type label (e.g. "Art gallery"), used as a real,
    * non-fabricated fallback when a place has no editorial summary. */
   category?: string;
+  /** The business's own real website — often where an actual reservation
+   * system (OpenTable, Resy, Tock, or their own booking form) lives.
+   * Only ever set when Google Places genuinely returns one. */
+  websiteUri?: string;
+  /** Real phone number in international format, straight from Google —
+   * lets "Reserve" mean an actual call to the actual place when there's
+   * no online booking link. */
+  phone?: string;
 };
 
 export const googlePlacesClient = {
@@ -237,7 +245,7 @@ export const googlePlacesClient = {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": config.travel.googlePlacesKey,
           "X-Goog-FieldMask":
-            "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.editorialSummary,places.photos,places.primaryTypeDisplayName,nextPageToken",
+            "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.editorialSummary,places.photos,places.primaryTypeDisplayName,places.websiteUri,places.nationalPhoneNumber,nextPageToken",
         },
         body: JSON.stringify(body),
       });
@@ -256,6 +264,8 @@ export const googlePlacesClient = {
         address: p.formattedAddress as string | undefined,
         description: p.editorialSummary?.text as string | undefined,
         category: p.primaryTypeDisplayName?.text as string | undefined,
+        websiteUri: p.websiteUri as string | undefined,
+        phone: p.nationalPhoneNumber as string | undefined,
       }));
       return { live: true, items, nextPageToken: (data.nextPageToken as string | undefined) ?? null };
     } catch (err) {
