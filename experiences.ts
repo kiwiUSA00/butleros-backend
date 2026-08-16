@@ -46,6 +46,7 @@ export async function curateExperiences(params: CurateExperiencesParams): Promis
         rating: e.rating as number | undefined,
         userRatingCount: e.userRatingCount as number | undefined,
         address: e.address as string | undefined,
+        category: e.category as string | undefined,
       };
     });
 
