@@ -86,6 +86,8 @@ export interface ExperienceCard {
   rating?: number;
   userRatingCount?: number;
   address?: string;
+  /** Google's own place-type label — real fallback context when there's no editorial description. */
+  category?: string;
 }
 
 // ---- Calendar ----
