@@ -160,6 +160,9 @@ type PlaceItem = {
   userRatingCount?: number;
   address?: string;
   description?: string;
+  /** Google's own place-type label (e.g. "Art gallery"), used as a real,
+   * non-fabricated fallback when a place has no editorial summary. */
+  category?: string;
 };
 
 export const googlePlacesClient = {
@@ -173,7 +176,7 @@ export const googlePlacesClient = {
    * pages can offer "Load more" instead of being capped at a handful of
    * items.
    */
-  async searchPlaces(params: { query?: string; location?: string; budget?: number; pageToken?: string }) {
+  async searchPlaces(params: { query?: string; location?: string; budget?: number; pageToken?: string; lat?: number; lon?: number }) {
     if (!this.configured) {
       warnIfUnconfigured("Google Places", config.travel.googlePlacesKey);
       return { live: false, items: [] as PlaceItem[], nextPageToken: null as string | null };
@@ -186,6 +189,15 @@ export const googlePlacesClient = {
         pageSize: 20,
         textQuery: `${params.query ?? "things to do"} in ${params.location ?? ""}`,
       };
+      // Real coordinates (from the visitor's own IP geolocation) bias and
+      // re-rank results by actual distance instead of just matching the
+      // city name — genuinely "close to me" instead of "somewhere in this
+      // city." Only applied when the caller has real coords for exactly
+      // where the visitor is (never fabricated/estimated).
+      if (typeof params.lat === "number" && typeof params.lon === "number") {
+        body.locationBias = { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: 15000 } };
+        body.rankPreference = "DISTANCE";
+      }
       if (params.pageToken) body.pageToken = params.pageToken;
       const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
         method: "POST",
@@ -193,7 +205,7 @@ export const googlePlacesClient = {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": config.travel.googlePlacesKey,
           "X-Goog-FieldMask":
-            "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.editorialSummary,places.photos,nextPageToken",
+            "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.editorialSummary,places.photos,places.primaryTypeDisplayName,nextPageToken",
         },
         body: JSON.stringify(body),
       });
@@ -211,6 +223,7 @@ export const googlePlacesClient = {
         userRatingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : undefined,
         address: p.formattedAddress as string | undefined,
         description: p.editorialSummary?.text as string | undefined,
+        category: p.primaryTypeDisplayName?.text as string | undefined,
       }));
       return { live: true, items, nextPageToken: (data.nextPageToken as string | undefined) ?? null };
     } catch (err) {
