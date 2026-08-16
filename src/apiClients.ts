@@ -1065,7 +1065,14 @@ export const seatGeekClient = {
       const city = params.location ?? "";
       const url = `https://api.seatgeek.com/2/events?venue.city=${encodeURIComponent(city)}&per_page=24&sort=datetime_local.asc&client_id=${config.calendar.seatGeekClientId}`;
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`SeatGeek API returned ${res.status}`);
+      if (!res.ok) {
+        // Capture the response body (not just the status code) so a real
+        // cause — bad client_id, quota exceeded, account not yet
+        // approved, etc. — actually shows up in the logs instead of a
+        // bare, undiagnosable "403".
+        const bodyText = await res.text().catch(() => "");
+        throw new Error(`SeatGeek API returned ${res.status}: ${bodyText.slice(0, 300)}`);
+      }
       const data: any = await res.json();
       const raw = data.events ?? [];
       const events: SeatGeekEvent[] = raw.map((e: any) => ({
