@@ -408,7 +408,7 @@ export const rakutenClient = {
   async searchProducts(params: { need?: string; category?: string; budget?: number }) {
     if (!this.configured) {
       warnIfUnconfigured("Rakuten Advertising", config.shopping.rakutenKey);
-      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy" }[] };
+      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy"; image?: string }[] };
     }
     try {
       const keyword = encodeURIComponent(params.need || params.category || "gift");
@@ -427,11 +427,12 @@ export const rakutenClient = {
         price: Number(it.price ?? params.budget ?? 0),
         currency: it.currency ?? "USD",
         retailer: "bestbuy" as const,
+        image: (it.imageurl || it.image) as string | undefined,
       }));
       return { live: true, items };
     } catch (err) {
       logFailure("Rakuten Advertising", err);
-      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy" }[] };
+      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy"; image?: string }[] };
     }
   },
   async getAffiliateLink(productId: string) {
@@ -503,11 +504,11 @@ export const bestBuyClient = {
   async searchProducts(params: { need?: string; category?: string; budget?: number }) {
     if (!this.configured) {
       warnIfUnconfigured("Best Buy", config.shopping.bestbuyKey);
-      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy" }[] };
+      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy"; image?: string }[] };
     }
     try {
       const query = params.need || params.category || "gift";
-      const url = `https://api.bestbuy.com/v1/products(search=${encodeURIComponent(query)})?apiKey=${config.shopping.bestbuyKey}&format=json&pageSize=3`;
+      const url = `https://api.bestbuy.com/v1/products(search=${encodeURIComponent(query)})?apiKey=${config.shopping.bestbuyKey}&format=json&pageSize=6&show=sku,name,salePrice,regularPrice,image,largeImage`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Best Buy API returned ${res.status}`);
       const data: any = await res.json();
@@ -518,11 +519,13 @@ export const bestBuyClient = {
         price: Number(p.salePrice ?? p.regularPrice ?? 0),
         currency: "USD",
         retailer: "bestbuy" as const,
+        // Real product photo from Best Buy's own catalog — never a placeholder.
+        image: (p.largeImage || p.image) as string | undefined,
       }));
       return { live: true, items };
     } catch (err) {
       logFailure("Best Buy", err);
-      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy" }[] };
+      return { live: false, items: [] as { id: string; name: string; category: string; price: number; currency: string; retailer: "bestbuy"; image?: string }[] };
     }
   },
 };
