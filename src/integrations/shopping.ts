@@ -25,11 +25,14 @@ export async function findProducts(params: FindProductsParams): Promise<ProductR
 
   return Promise.all(
     rawItems.map(async (p) => {
+      const { image, ...rest } = p as typeof p & { image?: string };
       const link = await getAffiliateLink(p.id, p.retailer);
       return {
-        ...p,
+        ...rest,
         affiliateLink: link.url,
-        imageUrl: "https://example.com/img/placeholder.jpg",
+        // The product's own real catalog photo — never a fabricated placeholder.
+        // Left empty (not fetched) when the source didn't return one.
+        imageUrl: image || "",
         live: p.retailer === "bestbuy" ? bestbuy.live : rakuten.live,
       };
     })
