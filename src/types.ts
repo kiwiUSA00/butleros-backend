@@ -79,6 +79,13 @@ export interface ExperienceCard {
   location: string;
   bookingOptions: { provider: string; url: string }[];
   live: boolean;
+  /** Google Places photo resource name (fetched via /butler/photo) when the source provider is Google Places. */
+  photoName?: string;
+  /** Direct image URL when the source provider gives one (e.g. a product image). */
+  imageUrl?: string;
+  rating?: number;
+  userRatingCount?: number;
+  address?: string;
 }
 
 // ---- Calendar ----
