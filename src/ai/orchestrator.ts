@@ -124,7 +124,7 @@ async function runShoppingPlan(
         need: plan.need,
         category: plan.category,
         budget: plan.budget,
-      })) as { live: boolean; items: Omit<ProductRecommendation, "affiliateLink" | "imageUrl" | "live">[] };
+      })) as { live: boolean; items: (Omit<ProductRecommendation, "affiliateLink" | "imageUrl" | "live"> & { image?: string })[] };
 
       if (!live) continue; // gated/unconfigured provider — nothing to add
 
@@ -137,7 +137,10 @@ async function runShoppingPlan(
           // Provider has no link-generation method of its own (e.g. Best Buy routes
           // through Rakuten in practice — see AFFILIATE_SETUP.md) — leave it null.
         }
-        results.push({ ...item, affiliateLink, imageUrl: "https://example.com/img/placeholder.jpg", live: true });
+        const { image, ...rest } = item;
+        // Real catalog photo from the provider, never a fabricated placeholder —
+        // left empty when the source didn't return one.
+        results.push({ ...rest, affiliateLink, imageUrl: image || "", live: true });
       }
       integrationsUsed.push(`shopping:${provider}`);
     } catch (err) {
