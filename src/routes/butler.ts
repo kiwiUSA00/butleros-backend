@@ -13,11 +13,14 @@ const router = Router();
 // POST /butler/run
 // Body: { userId }
 router.post("/run", async (req, res) => {
-  const { userId } = req.body ?? {};
+  const { userId, location } = req.body ?? {};
   if (!userId) return res.status(400).json({ error: "userId is required" });
 
   try {
-    const results = await runButlerCycle(userId);
+    // `location` (IP-detected or explicitly chosen on the client) always
+    // takes priority over the user's saved favorite location — see
+    // runButlerCycle/callAiButlerPlanner in ai/orchestrator.ts.
+    const results = await runButlerCycle(userId, {}, location);
     res.json(results);
   } catch (err: any) {
     res.status(404).json({ error: err.message ?? "Failed to run butler cycle" });
