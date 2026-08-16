@@ -324,13 +324,13 @@ Every credential name below matches an environment variable already wired into
 - **Notes:** Because this is per-user credentials rather than a global app key, real implementation needs a secure per-user credential store, not just an env var.
 
 ### Eventbrite API
-- **Signup:** https://www.eventbrite.com/platform/api — create an app, get a personal OAuth token for your own account
-- **Credentials:** OAuth2 token (personal token for your own org's events; full OAuth flow for acting on behalf of other organizers)
+- **Signup:** Log in to Eventbrite → Account settings → Developer links → API keys → Create API key. This generates a **Private Token** — a static bearer token for your own account, no OAuth redirect flow needed.
+- **Credentials:** Private token (personal, for your own org's events; a full 3-legged OAuth flow is only needed to act on behalf of *other* organizers, which BOS doesn't do)
 - **Env vars:** `EVENTBRITE_KEY`
-- **Auth method:** OAuth2 bearer token
+- **Auth method:** Bearer token (`Authorization: Bearer <private token>`)
 - **Rate limits:** Not publicly published post-2020 changes
-- **ButlerOS usage:** `calendar.findEvents()` — local public event discovery
-- **Notes:** ⚠️ Eventbrite retired the public **Event Search** endpoint (`GET /v3/events/search/`) in February 2020. The API today is centered on managing your own org's events, not searching all public Eventbrite listings. To power a "what's happening near me" style feature, you'd need to apply to Eventbrite's distribution partner program — it's not available via a normal API key.
+- **ButlerOS usage:** `eventbriteClient.findEvents()` (`apiClients.ts`) → `GET /butler/my-events` → the standalone **Events** page, plus compact panels on Home and Calendar
+- **Notes:** ⚠️ Eventbrite retired the public **Event Search** endpoint (`GET /v3/events/search/`) in February 2020. The API today is centered on managing your own org's events, not searching all public Eventbrite listings — this integration genuinely shows *your own* organization's events (via `GET /v3/users/me/organizations/` then `GET /v3/organizations/{id}/events/`), not a "what's happening near me" discovery feed. Ticketmaster (below, already wired) covers real public event discovery instead.
 - **Sources:** [API Terms of Use](https://www.eventbrite.com/help/en-us/articles/833731/eventbrite-api-terms-of-use/)
 
 ### Ticketmaster (Discovery API)
@@ -342,6 +342,15 @@ Every credential name below matches an environment variable already wired into
 - **Example request:** `GET https://app.ticketmaster.com/discovery/v2/events.json?city=Austin&apikey=API_KEY`
 - **ButlerOS usage:** `calendar.findEvents()` — ticketed event discovery
 - **Sources:** [Discovery API](https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/), [FAQs](https://developer.ticketmaster.com/support/faq/)
+
+### SeatGeek (Platform API)
+- **Signup:** https://seatgeek.com/build — instant self-serve `client_id`, no partner approval wait
+- **Credentials:** `client_id` (free tier)
+- **Env vars:** `SEATGEEK_CLIENT_ID`
+- **Auth method:** Query parameter (`client_id=`)
+- **Example request:** `GET https://api.seatgeek.com/2/events?venue.city=Austin&client_id=CLIENT_ID`
+- **ButlerOS usage:** `seatGeekClient.findEvents()` (`apiClients.ts`), merged with Ticketmaster in `GET /butler/events` (same-title-same-day results are de-duped) — a second, independent real event source, broadening coverage in markets Ticketmaster's listings are thin in
+- **Sources:** [SeatGeek Platform](https://seatgeek.com/build), [Can I use SeatGeek data or an API?](https://support.seatgeek.com/hc/en-us/articles/4409765051283-Can-I-Use-SeatGeek-Data-or-an-API)
 
 ---
 
@@ -389,8 +398,8 @@ Every credential name below matches an environment variable already wired into
 
 | Tier | APIs |
 |---|---|
-| **Instant, free, self-serve** | Plaid (sandbox), Stripe, DoorDash Drive (sandbox), Best Buy, Ticketmaster, Yelp Fusion, Google Places/Maps, OpenWeather, Tomorrow.io, TripAdvisor Content API, Google Calendar, Rakuten, Skimlinks |
-| **Self-serve but approval-gated (days–weeks)** | Instacart, TaskRabbit, Uber/Lyft (ride-booking scopes), Skyscanner, Outlook (Azure AD app review for some permissions), Eventbrite (distribution partner program) |
+| **Instant, free, self-serve** | Plaid (sandbox), Stripe, DoorDash Drive (sandbox), Best Buy, Ticketmaster, Yelp Fusion, Google Places/Maps, OpenWeather, Tomorrow.io, TripAdvisor Content API, Google Calendar, Rakuten, Skimlinks, Eventbrite (private token, own-org events only — see note above) |
+| **Self-serve but approval-gated (days–weeks)** | Instacart, TaskRabbit, Uber/Lyft (ride-booking scopes), Skyscanner, Outlook (Azure AD app review for some permissions) |
 | **Affiliate-network signup (Impact), no product API** | Walmart, Target |
 | **Sales/BD relationship required** | Expedia, Booking.com Demand API, Airbnb, Turo, Yodlee (production), Rocket Money, Visa Offers, Mastercard Offers |
 | **Shut down — no self-serve path left** | Amadeus for Developers (self-service portal closed 2026-07-17; only the separately-contracted Enterprise portal still works) |
