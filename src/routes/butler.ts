@@ -5,7 +5,7 @@ import * as travel from "../integrations/travel";
 import * as finance from "../integrations/finance";
 import * as calendar from "../integrations/calendar";
 import * as shopping from "../integrations/shopping";
-import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, googlePlacesClient, nominatimClient } from "../apiClients";
+import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, googlePlacesClient, nominatimClient, eventbriteClient } from "../apiClients";
 import { integrationStatus } from "../integrationRegistry";
 import { getUser } from "../store/userStore";
 
@@ -220,6 +220,17 @@ router.get("/products", async (req, res) => {
   const items = await shopping.findProducts({ need, category, budget });
   const live = items.some((i) => i.live);
   res.json({ items, live, source: live ? "shopping" : "not_connected" });
+});
+
+// GET /butler/my-events
+// Real events belonging to the connected Eventbrite account's own
+// organization (a private-token, server-side integration — see
+// eventbriteClient in apiClients.ts for why this can't be a general
+// "events near me" search). Distinct from /butler/events (Ticketmaster),
+// which is genuine public event discovery.
+router.get("/my-events", async (_req, res) => {
+  const { live, events } = await eventbriteClient.findEvents();
+  res.json({ events, live, source: live ? "eventbrite" : "not_connected" });
 });
 
 // GET /butler/integrations
