@@ -5,7 +5,7 @@ import * as travel from "../integrations/travel";
 import * as finance from "../integrations/finance";
 import * as calendar from "../integrations/calendar";
 import * as shopping from "../integrations/shopping";
-import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, googlePlacesClient, nominatimClient, eventbriteClient } from "../apiClients";
+import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, seatGeekClient, googlePlacesClient, nominatimClient, eventbriteClient } from "../apiClients";
 import { integrationStatus } from "../integrationRegistry";
 import { getUser } from "../store/userStore";
 
@@ -191,10 +191,31 @@ router.get("/photo", async (req, res) => {
 });
 
 // GET /butler/events?location=Austin
+// Merges two independent, genuinely public city-event sources —
+// Ticketmaster and SeatGeek — each with its own real inventory, so
+// coverage is broader than either alone (especially in markets one of
+// the two covers thinly). Same title + same calendar day is treated as
+// the same real-world event and only shown once, favoring whichever
+// source listed it first (Ticketmaster). Neither source contributing
+// still leaves an honest empty state, never fabricated listings.
 router.get("/events", async (req, res) => {
   const location = (req.query.location as string) || "Austin";
-  const { live, events } = await ticketmasterClient.findEvents({ location });
-  res.json({ location, events, live, source: live ? "ticketmaster" : "not_connected" });
+  const [tm, sg] = await Promise.all([
+    ticketmasterClient.findEvents({ location }),
+    seatGeekClient.findEvents({ location }),
+  ]);
+  const dedupeKey = (e: { title: string; start: string | null }) =>
+    `${e.title.toLowerCase().trim()}|${(e.start || "").slice(0, 10)}`;
+  const seen = new Set<string>();
+  const events = [...tm.events, ...sg.events].filter((e) => {
+    const key = dedupeKey(e);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const live = tm.live || sg.live;
+  const sources = [tm.live && "ticketmaster", sg.live && "seatgeek"].filter(Boolean);
+  res.json({ location, events, live, source: sources.length ? sources.join("+") : "not_connected" });
 });
 
 // GET /butler/geocode?location=Austin
