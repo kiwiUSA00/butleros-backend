@@ -182,30 +182,48 @@ export const googlePlacesClient = {
       return { live: false, items: [] as PlaceItem[], nextPageToken: null as string | null };
     }
     try {
+      const hasCoords = typeof params.lat === "number" && typeof params.lon === "number";
       // Google requires every parameter except pageSize/pageToken to stay
       // identical across paginated requests (a changed textQuery returns
       // INVALID_ARGUMENT) — so textQuery is always included, page after page.
+      //
+      // When we have the visitor's real coordinates, geography is enforced
+      // below by a hard locationRestriction box, so the query text is just
+      // the category itself. Keeping a city name in the text here actively
+      // fought the geo fix: Google's relevance ranking favors results whose
+      // address/description also mentions that city name, which quietly
+      // pulled results back toward famous, centrally-located spots (e.g.
+      // Manhattan) even for a visitor in an outer neighborhood like South
+      // Slope, Brooklyn — confirmed live: the real request carried correct
+      // Brooklyn coordinates, but "restaurants in New York City" as the
+      // text still returned Manhattan mainstays. Without coordinates, the
+      // city name is the only geography signal available, so it stays.
       const body: Record<string, unknown> = {
         pageSize: 20,
-        textQuery: `${params.query ?? "things to do"} in ${params.location ?? ""}`,
+        textQuery: hasCoords ? (params.query ?? "things to do") : `${params.query ?? "things to do"} in ${params.location ?? ""}`,
       };
-      // Real coordinates (from the visitor's own IP/GPS geolocation) bias
-      // results toward wherever they actually are, instead of just
-      // matching the city name — genuinely "close to me" rather than
-      // "somewhere in this city." Only applied when the caller has real
-      // coords for exactly where the visitor is (never fabricated).
-      //
-      // Deliberately NOT setting rankPreference:"DISTANCE" here — that
-      // forces Google to sort purely by raw proximity, which throws away
-      // rating/popularity/relevance entirely and can easily surface a
-      // mediocre place that's 200ft closer over a genuinely great one a
-      // few blocks away. locationBias alone still nudges results toward
-      // this radius while keeping Google's default RELEVANCE ranking
-      // (rating + prominence + text match), which is what "good AND
-      // nearby" actually requires. A tighter 6km radius also keeps
-      // "close to me" feeling local rather than metro-wide.
-      if (typeof params.lat === "number" && typeof params.lon === "number") {
-        body.locationBias = { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: 6000 } };
+      if (hasCoords) {
+        const lat = params.lat as number;
+        const lon = params.lon as number;
+        // A hard ~6km bounding box around the visitor's real coordinates
+        // (locationRestriction only accepts a rectangle, not a circle, so
+        // the radius is converted to lat/lon deltas). This *guarantees*
+        // every result is genuinely near them, unlike locationBias, which
+        // is only a soft nudge a stronger text signal (like a city name)
+        // can override — exactly what was pulling results toward
+        // Manhattan for a Brooklyn visitor. Ranking within the box still
+        // uses Google's default RELEVANCE (rating + prominence + text
+        // match), so results stay both local and good, not just whatever
+        // happens to be literally closest.
+        const radiusMeters = 6000;
+        const latDelta = radiusMeters / 111320;
+        const lonDelta = radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180));
+        body.locationRestriction = {
+          rectangle: {
+            low: { latitude: lat - latDelta, longitude: lon - lonDelta },
+            high: { latitude: lat + latDelta, longitude: lon + lonDelta },
+          },
+        };
       }
       if (params.pageToken) body.pageToken = params.pageToken;
       const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
