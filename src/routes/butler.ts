@@ -4,6 +4,7 @@ import * as experiences from "../integrations/experiences";
 import * as travel from "../integrations/travel";
 import * as finance from "../integrations/finance";
 import * as calendar from "../integrations/calendar";
+import * as shopping from "../integrations/shopping";
 import { openWeatherClient, tomorrowIoClient, nwsClient, openMeteoClient, yelpClient, ticketmasterClient, googlePlacesClient, nominatimClient } from "../apiClients";
 import { integrationStatus } from "../integrationRegistry";
 import { getUser } from "../store/userStore";
@@ -199,6 +200,21 @@ router.get("/geocode", async (req, res) => {
   if (!location) return res.status(400).json({ error: "location is required" });
   const coords = await nominatimClient.geocode(location);
   res.json({ location, lat: coords ? coords.lat : null, lon: coords ? coords.lon : null, live: !!coords });
+});
+
+// GET /butler/products?need=&category=&budget=
+// Real product matches ("Complete the Experience" panel) — Best Buy's own
+// catalog search plus Rakuten Advertising when configured, each with the
+// provider's real product photo, price, and a working affiliate link. Amazon
+// and Walmart have no self-serve product-search API (see INTEGRATIONS.md),
+// so they never contribute fabricated items here even if a key is set.
+router.get("/products", async (req, res) => {
+  const need = (req.query.need as string) || undefined;
+  const category = (req.query.category as string) || undefined;
+  const budget = req.query.budget ? Number(req.query.budget) : undefined;
+  const items = await shopping.findProducts({ need, category, budget });
+  const live = items.some((i) => i.live);
+  res.json({ items, live, source: live ? "shopping" : "not_connected" });
 });
 
 // GET /butler/integrations
