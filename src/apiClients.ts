@@ -1028,15 +1028,37 @@ const CITY_COORDS_CACHE: Record<string, { lat: number; lon: number }> = {
  * usage policy asks for a descriptive User-Agent and no more than ~1
  * request/sec, which the small in-memory cache here helps respect.
  */
+// Nominatim chokes on suite/floor/unit fragments ("1st Floor", "Ste 200",
+// "Apt 4B") that real Google Places addresses often include — it's a full
+// mailing address, not a geocodable place query. Stripping those fragments
+// before the first lookup, then falling back to just the city/state tail of
+// the address if even that fails, keeps precise real addresses geocodable
+// without inventing any coordinates.
+function simplifyAddressForGeocoding(location: string): string {
+  return location
+    .replace(/\b(?:suite|ste|unit|floor|fl|apt|apartment|room|rm)\.?\s*#?\s*[\w-]*/gi, "")
+    .replace(/#\s*[\w-]+/g, "")
+    .replace(/\s*,\s*,/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^\s*,\s*|\s*,\s*$/g, "")
+    .trim();
+}
+
+function cityStateTailOf(location: string): string | null {
+  const parts = location.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  // Last 2-3 comma-separated segments usually carry city/state/country
+  // (e.g. "New York, NY 10038, USA") even when the street-level portion
+  // is too specific for Nominatim to match.
+  return parts.slice(-3).join(", ");
+}
+
 export const nominatimClient = {
   name: "OpenStreetMap Nominatim (geocoding) — no key required",
   configured: true,
-  async geocode(location?: string): Promise<{ lat: number; lon: number } | null> {
-    if (!location) return null;
-    const key = location.trim().toLowerCase();
-    if (CITY_COORDS_CACHE[key]) return CITY_COORDS_CACHE[key];
+  async rawLookup(query: string): Promise<{ lat: number; lon: number } | null> {
     try {
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`;
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
       const res = await fetch(url, { headers: { "User-Agent": "ButlerOS/1.0 (contact: troy.evans@outlook.com)" } });
       if (!res.ok) throw new Error(`Nominatim API returned ${res.status}`);
       const data: any = await res.json();
@@ -1044,12 +1066,38 @@ export const nominatimClient = {
       if (!hit) return null;
       const coords = { lat: parseFloat(hit.lat), lon: parseFloat(hit.lon) };
       if (Number.isNaN(coords.lat) || Number.isNaN(coords.lon)) return null;
-      CITY_COORDS_CACHE[key] = coords; // cache for the life of this process
       return coords;
     } catch (err) {
       logFailure("Nominatim", err);
       return null;
     }
+  },
+  async geocode(location?: string): Promise<{ lat: number; lon: number } | null> {
+    if (!location) return null;
+    const key = location.trim().toLowerCase();
+    if (CITY_COORDS_CACHE[key]) return CITY_COORDS_CACHE[key];
+
+    // 1) Try the address exactly as given.
+    let coords = await this.rawLookup(location);
+
+    // 2) Strip suite/floor/unit fragments Nominatim can't parse, retry.
+    if (!coords) {
+      const simplified = simplifyAddressForGeocoding(location);
+      if (simplified && simplified.toLowerCase() !== key) {
+        coords = await this.rawLookup(simplified);
+      }
+    }
+
+    // 3) Fall back to just the city/state/country tail of the address —
+    // still a real, honest location for the pin, just less precise.
+    if (!coords) {
+      const tail = cityStateTailOf(location);
+      if (tail) coords = await this.rawLookup(tail);
+    }
+
+    if (!coords) return null;
+    CITY_COORDS_CACHE[key] = coords; // cache for the life of this process
+    return coords;
   },
 };
 
