@@ -55,6 +55,7 @@ export const integrationRegistry = {
     appleCaldav: clients.appleCaldavClient,
     eventbrite: clients.eventbriteClient,
     ticketmaster: clients.ticketmasterClient,
+    seatGeek: clients.seatGeekClient,
   },
   recommendations: {
     yelp: clients.yelpClient,

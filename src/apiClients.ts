@@ -171,6 +171,13 @@ type PlaceItem = {
    * lets "Reserve" mean an actual call to the actual place when there's
    * no online booking link. */
   phone?: string;
+  /** Google's own $ / $$ / $$$ / $$$$ price band, only set when Google
+   * actually returns one — not every place has pricing data. */
+  priceLevel?: "PRICE_LEVEL_FREE" | "PRICE_LEVEL_INEXPENSIVE" | "PRICE_LEVEL_MODERATE" | "PRICE_LEVEL_EXPENSIVE" | "PRICE_LEVEL_VERY_EXPENSIVE";
+  /** Real-time open/closed status from Google's current opening hours.
+   * Undefined (not false) when Google doesn't have hours data for this
+   * place, so the frontend can distinguish "known closed" from "unknown". */
+  openNow?: boolean;
 };
 
 export const googlePlacesClient = {
@@ -245,7 +252,7 @@ export const googlePlacesClient = {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": config.travel.googlePlacesKey,
           "X-Goog-FieldMask":
-            "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.editorialSummary,places.photos,places.primaryTypeDisplayName,places.websiteUri,places.nationalPhoneNumber,nextPageToken",
+            "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.editorialSummary,places.photos,places.primaryTypeDisplayName,places.websiteUri,places.nationalPhoneNumber,places.priceLevel,places.currentOpeningHours.openNow,nextPageToken",
         },
         body: JSON.stringify(body),
       });
@@ -266,6 +273,8 @@ export const googlePlacesClient = {
         category: p.primaryTypeDisplayName?.text as string | undefined,
         websiteUri: p.websiteUri as string | undefined,
         phone: p.nationalPhoneNumber as string | undefined,
+        priceLevel: p.priceLevel as PlaceItem["priceLevel"],
+        openNow: typeof p.currentOpeningHours?.openNow === "boolean" ? p.currentOpeningHours.openNow : undefined,
       }));
       return { live: true, items, nextPageToken: (data.nextPageToken as string | undefined) ?? null };
     } catch (err) {
@@ -1017,6 +1026,63 @@ export const ticketmasterClient = {
       return { live: true, events };
     } catch (err) {
       logFailure("Ticketmaster", err);
+      return { live: false, events: [] };
+    }
+  },
+};
+
+export interface SeatGeekEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  start: string | null;
+  venueName: string | null;
+  address: string | null;
+  city: string | null;
+  url: string | null;
+  imageUrl: string | null;
+  segment: string | null;
+}
+
+export const seatGeekClient = {
+  name: "SeatGeek Platform API",
+  configured: hasKeys(config.calendar.seatGeekClientId),
+  /**
+   * A second, independent real event-discovery source alongside
+   * Ticketmaster (see /butler/events, which merges both) — SeatGeek's
+   * Platform API gives a free, instant, self-serve client_id at
+   * seatgeek.com/build, no partner approval wait. Different underlying
+   * inventory than Ticketmaster (sports/concerts/theater), so together
+   * they genuinely surface more real events than either alone, especially
+   * for smaller markets Ticketmaster's coverage is thin in.
+   */
+  async findEvents(params: { location?: string; date?: string } = {}): Promise<{ live: boolean; events: SeatGeekEvent[] }> {
+    if (!this.configured) {
+      warnIfUnconfigured("SeatGeek", config.calendar.seatGeekClientId);
+      return { live: false, events: [] };
+    }
+    try {
+      const city = params.location ?? "";
+      const url = `https://api.seatgeek.com/2/events?venue.city=${encodeURIComponent(city)}&per_page=24&sort=datetime_local.asc&client_id=${config.calendar.seatGeekClientId}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`SeatGeek API returned ${res.status}`);
+      const data: any = await res.json();
+      const raw = data.events ?? [];
+      const events: SeatGeekEvent[] = raw.map((e: any) => ({
+        id: `sg-${e.id}`,
+        title: e.title || e.short_title || "Untitled event",
+        description: null,
+        start: e.datetime_local || null,
+        venueName: e.venue?.name || null,
+        address: e.venue ? [e.venue.address, e.venue.city, e.venue.state].filter(Boolean).join(", ") : null,
+        city: e.venue?.city || null,
+        url: e.url || null,
+        imageUrl: e.performers?.[0]?.image || null,
+        segment: e.type ? String(e.type).replace(/_/g, " ") : null,
+      }));
+      return { live: true, events };
+    } catch (err) {
+      logFailure("SeatGeek", err);
       return { live: false, events: [] };
     }
   },

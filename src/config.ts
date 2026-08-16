@@ -76,6 +76,11 @@ export const config = {
     appleCaldavConfig: env("APPLE_CALDAV_CONFIG"),
     eventbriteKey: env("EVENTBRITE_KEY"),
     ticketmasterKey: env("TICKETMASTER_KEY"),
+    // SeatGeek's Platform API (seatgeek.com/build) — free, instant,
+    // self-serve client_id, no partner approval wait. Used alongside
+    // Ticketmaster in /butler/events for broader real event coverage;
+    // duplicate listings between the two are de-duped by title+date.
+    seatGeekClientId: env("SEATGEEK_CLIENT_ID"),
   },
 
   misc: {
