@@ -917,27 +917,65 @@ export const eventbriteClient = {
   },
 };
 
+export interface TicketmasterEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  start: string | null;
+  venueName: string | null;
+  address: string | null;
+  city: string | null;
+  url: string | null;
+  imageUrl: string | null;
+  segment: string | null; // Ticketmaster's own genre label, e.g. "Music", "Sports", "Arts & Theatre"
+}
+
 export const ticketmasterClient = {
   name: "Ticketmaster Discovery API",
   configured: hasKeys(config.calendar.ticketmasterKey),
-  async findEvents(params: { location?: string; date?: string }) {
+  /**
+   * Real, public "what's happening in this city" event discovery — unlike
+   * Eventbrite (org-scoped only, see eventbriteClient above), Ticketmaster's
+   * Discovery API genuinely supports searching all public listings by city,
+   * with a free, instant, self-serve key (developer.ticketmaster.com) —
+   * no OAuth, no approval wait.
+   */
+  async findEvents(params: { location?: string; date?: string } = {}): Promise<{ live: boolean; events: TicketmasterEvent[] }> {
     if (!this.configured) {
       warnIfUnconfigured("Ticketmaster", config.calendar.ticketmasterKey);
-      return { live: false, events: [] as { id: string; title: string; date: string }[] };
+      return { live: false, events: [] };
     }
     try {
-      const url = `https://app.ticketmaster.com/discovery/v2/events.json?city=${encodeURIComponent(params.location ?? "")}&apikey=${config.calendar.ticketmasterKey}`;
+      const city = params.location ?? "";
+      const url = `https://app.ticketmaster.com/discovery/v2/events.json?city=${encodeURIComponent(city)}&size=24&sort=date,asc&apikey=${config.calendar.ticketmasterKey}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Ticketmaster API returned ${res.status}`);
       const data: any = await res.json();
-      const events = data._embedded?.events ?? [];
-      return {
-        live: true,
-        events: events.map((e: any) => ({ id: e.id, title: e.name, date: e.dates?.start?.localDate ?? params.date ?? new Date().toISOString() })),
-      };
+      const raw = data._embedded?.events ?? [];
+      const events: TicketmasterEvent[] = raw.map((e: any) => {
+        const venue = e._embedded?.venues?.[0];
+        const image =
+          (e.images || []).find((im: any) => im.ratio === "16_9" && im.width >= 640) || e.images?.[0] || null;
+        const start =
+          e.dates?.start?.dateTime ||
+          (e.dates?.start?.localDate ? `${e.dates.start.localDate}T${e.dates.start.localTime || "00:00:00"}` : null);
+        return {
+          id: e.id,
+          title: e.name,
+          description: e.info || e.pleaseNote || null,
+          start,
+          venueName: venue?.name || null,
+          address: venue ? [venue.address?.line1, venue.city?.name, venue.state?.stateCode].filter(Boolean).join(", ") : null,
+          city: venue?.city?.name || null,
+          url: e.url || null,
+          imageUrl: image?.url || null,
+          segment: e.classifications?.[0]?.segment?.name || null,
+        };
+      });
+      return { live: true, events };
     } catch (err) {
       logFailure("Ticketmaster", err);
-      return { live: false, events: [] as { id: string; title: string; date: string }[] };
+      return { live: false, events: [] };
     }
   },
 };
