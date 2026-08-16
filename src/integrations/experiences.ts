@@ -23,14 +23,49 @@ function priceBandFor(price: number): "low" | "medium" | "high" {
   return "high";
 }
 
+// Real bug found live: "Plan My Weekend" always returned the identical
+// handful of places for a given city, click after click — mood was never
+// actually fed into the search, so every call issued the exact same
+// "things to do" query and got Google's same deterministic top results
+// back. This maps the mood to a genuinely different real-world search
+// category so different moods produce different real places, not just
+// different copy.
+const MOOD_QUERY_MAP: { keys: string[]; query: string }[] = [
+  { keys: ["relax", "chill", "calm", "rest", "peaceful", "spa", "cozy"], query: "spa and relaxing cafes" },
+  { keys: ["adventur", "outdoor", "hike", "active", "thrill", "sport"], query: "outdoor adventure and hiking" },
+  { keys: ["romantic", "date night", "date", "love"], query: "romantic restaurants and scenic viewpoints" },
+  { keys: ["fun", "playful", "party", "lively", "energetic"], query: "fun activities and entertainment" },
+  { keys: ["cultur", "art", "museum", "history"], query: "museums and art galleries" },
+  { keys: ["food", "foodie", "culinary", "eat", "hungry"], query: "top-rated restaurants" },
+];
+function queryForMood(mood?: string): string {
+  if (!mood) return "things to do";
+  const lower = mood.toLowerCase();
+  const match = MOOD_QUERY_MAP.find((m) => m.keys.some((k) => lower.includes(k)));
+  return match ? match.query : "things to do";
+}
+
 export async function curateExperiences(params: CurateExperiencesParams): Promise<ExperienceCard[]> {
   const [travelExperiences, relatedProducts] = await Promise.all([
-    travel.searchExperiences({ location: params.location, budget: params.budget }),
+    travel.searchExperiences({ location: params.location, budget: params.budget, query: queryForMood(params.mood) }),
     shopping.findProducts({ need: params.mood, budget: params.budget }),
   ]);
 
-  const cards: ExperienceCard[] = travelExperiences
-    .filter((exp) => exp.live)
+  // Real results, reshuffled within the top-rated slice — even with the
+  // same mood/location, repeated "Plan My Weekend" clicks used to surface
+  // the identical top few out of Google's up-to-20 real results every
+  // time (a stable relevance order). Sorting by rating first keeps quality
+  // high; shuffling within that top slice keeps every card genuine while
+  // no longer showing the exact same plan on every click.
+  const liveExperiences = travelExperiences.filter((exp) => exp.live);
+  liveExperiences.sort((a: any, b: any) => (b.rating || 0) - (a.rating || 0));
+  const pool = liveExperiences.slice(0, 10);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  const cards: ExperienceCard[] = pool
     .map((exp) => {
       const e = exp as any;
       return {
@@ -46,6 +81,7 @@ export async function curateExperiences(params: CurateExperiencesParams): Promis
         rating: e.rating as number | undefined,
         userRatingCount: e.userRatingCount as number | undefined,
         address: e.address as string | undefined,
+        category: e.category as string | undefined,
       };
     });
 
