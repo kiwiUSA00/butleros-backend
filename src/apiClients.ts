@@ -40,6 +40,22 @@ function logFailure(service: string, err: unknown) {
   console.error(`[apiClients] ${service} real call failed:`, (err as Error).message);
 }
 
+/**
+ * Ticket/event platforms (SeatGeek confirmed live, Ticketmaster likely the
+ * same) key venues by the plain city name — "New York", not "New York
+ * City" — even though that colloquial form is exactly what geolocation
+ * reverse-geocoding and most users naturally produce. Confirmed live:
+ * querying SeatGeek for "New York City" returned 1 event; "New York"
+ * returned 22 for the identical real request. Only this one specific,
+ * very common case is special-cased; genuine place names that end in
+ * "City" (Kansas City, Jersey City, Oklahoma City, Atlantic City...) are
+ * left untouched.
+ */
+function normalizeCityForEventSearch(location: string): string {
+  const trimmed = location.trim();
+  return /^new york city$/i.test(trimmed) ? "New York" : trimmed;
+}
+
 const mockId = (prefix: string) => `${prefix}-${uuid().slice(0, 8)}`;
 
 function base64url(input: Buffer | string): string {
@@ -997,7 +1013,7 @@ export const ticketmasterClient = {
       return { live: false, events: [] };
     }
     try {
-      const city = params.location ?? "";
+      const city = normalizeCityForEventSearch(params.location ?? "");
       const url = `https://app.ticketmaster.com/discovery/v2/events.json?city=${encodeURIComponent(city)}&size=24&sort=date,asc&apikey=${config.calendar.ticketmasterKey}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Ticketmaster API returned ${res.status}`);
@@ -1062,7 +1078,7 @@ export const seatGeekClient = {
       return { live: false, events: [] };
     }
     try {
-      const city = params.location ?? "";
+      const city = normalizeCityForEventSearch(params.location ?? "");
       const url = `https://api.seatgeek.com/2/events?venue.city=${encodeURIComponent(city)}&per_page=24&sort=datetime_local.asc&client_id=${config.calendar.seatGeekClientId}`;
       const res = await fetch(url);
       if (!res.ok) {
