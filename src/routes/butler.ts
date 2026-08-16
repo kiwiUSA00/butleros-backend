@@ -155,18 +155,23 @@ router.get("/local", async (req, res) => {
   res.json({ query, location, results, live, source: live ? "yelp" : "not_connected" });
 });
 
-// GET /butler/places?query=restaurants&location=Austin&pageToken=...
+// GET /butler/places?query=restaurants&location=Austin&pageToken=...&lat=...&lon=...
 // Real Google Places (New) text search — used to give each category page
 // (Lifestyle/Travel/Dining/Wellness) its own genuinely different, live
 // content for whatever location the user is currently exploring. Each item
 // includes a real photo, rating, address, and description where Google has
 // one. Pass the previous response's `nextPageToken` back as `pageToken` to
 // page through further real results ("Load more") instead of being capped.
+// Optional `lat`/`lon` (the visitor's own real, IP-geolocated coordinates)
+// bias and re-rank results by actual distance — genuinely "close to me"
+// rather than just "somewhere in this city."
 router.get("/places", async (req, res) => {
   const query = (req.query.query as string) || "things to do";
   const location = (req.query.location as string) || "Austin";
   const pageToken = (req.query.pageToken as string) || undefined;
-  const { live, items, nextPageToken } = await googlePlacesClient.searchPlaces({ query, location, pageToken });
+  const lat = req.query.lat ? Number(req.query.lat) : undefined;
+  const lon = req.query.lon ? Number(req.query.lon) : undefined;
+  const { live, items, nextPageToken } = await googlePlacesClient.searchPlaces({ query, location, pageToken, lat, lon });
   res.json({ query, location, items, live, nextPageToken: nextPageToken ?? null, source: live ? "google_places" : "not_connected" });
 });
 
