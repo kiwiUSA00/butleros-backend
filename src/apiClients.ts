@@ -1198,37 +1198,102 @@ async function cityCoords(location?: string): Promise<{ lat: number; lon: number
   return nominatimClient.geocode(location);
 }
 
+// Standard Wikivoyage city-article template headings, in their usual
+// order — used to split one article's real extract into real, themed
+// sections (Eat, Do, Sleep, Get around, ...) instead of only ever exposing
+// the short intro blurb. Even with explaintext=1, MediaWiki's extracts API
+// keeps section headings as literal wikitext ("== Understand ==",
+// "=== Climate ===" for sub-headings) rather than stripping them to plain
+// lines — confirmed against a live response. Only level-2 ("==") headings
+// that match this known template list become section boundaries; any
+// other heading (an article-specific "== Districts ==", or a level-3/4
+// sub-heading like "=== Climate ===") has its real text folded into
+// whichever named section it falls under, with just the heading markup
+// itself stripped out. If an article doesn't follow the template at all,
+// this simply finds zero sections and callers fall back to the
+// intro-only behavior this client always had — never fabricated content.
+const WIKIVOYAGE_SECTION_HEADINGS = [
+  "Understand", "Get in", "Get around", "See", "Do", "Learn", "Buy", "Eat", "Drink",
+  "Sleep", "Stay safe", "Stay healthy", "Connect", "Cope", "Respect", "Talk", "Go next",
+];
+
+function splitWikivoyageArticle(fullText: string): { intro: string; sections: { heading: string; text: string }[] } {
+  const knownLower = new Set(WIKIVOYAGE_SECTION_HEADINGS.map((h) => h.toLowerCase()));
+  // Any-level heading line ("== X ==", "=== X ===", "==== X ===="), used
+  // to strip stray heading markup out of whatever text falls inside a
+  // section (e.g. a "=== Climate ===" sub-heading inside "== Understand ==").
+  const anyHeadingLine = /^={2,4}\s*.+?\s*={2,4}\s*$/gm;
+  const stripHeadingLines = (s: string) => s.replace(anyHeadingLine, "").replace(/\n{3,}/g, "\n\n").trim();
+
+  // Only level-2 headings ("== X ==") that match the known template above
+  // count as real section boundaries.
+  const namedHeadingRe = /^(={2})\s*(.+?)\s*\1\s*$/gm;
+  const namedMarks: { start: number; end: number; heading: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = namedHeadingRe.exec(fullText)) !== null) {
+    const raw = m[2].trim();
+    if (knownLower.has(raw.toLowerCase())) {
+      namedMarks.push({ start: m.index, end: m.index + m[0].length, heading: raw });
+    }
+  }
+
+  const introRaw = fullText.slice(0, namedMarks.length ? namedMarks[0].start : fullText.length);
+  const intro = stripHeadingLines(introRaw);
+
+  const sections: { heading: string; text: string }[] = [];
+  for (let i = 0; i < namedMarks.length; i++) {
+    const start = namedMarks[i].end;
+    const end = i + 1 < namedMarks.length ? namedMarks[i + 1].start : fullText.length;
+    const text = stripHeadingLines(fullText.slice(start, end));
+    // Skip near-empty sections (e.g. a heading with no real prose under it,
+    // just a sub-heading list) rather than showing a journal card with
+    // barely any real text in it.
+    if (text.length > 40) sections.push({ heading: namedMarks[i].heading, text: text.slice(0, 600) });
+  }
+  return { intro, sections };
+}
+
 /**
  * Wikivoyage (MediaWiki Action API). Fully open — no key, no account,
  * no rate-limit registration. Returns a real destination-guide excerpt
  * for whatever city/place title is passed in (MediaWiki resolves
- * redirects, e.g. "Austin" → "Austin (Texas)" automatically).
+ * redirects, e.g. "Austin" → "Austin (Texas)" automatically), plus the
+ * same article's real content broken into themed sections (Eat, Do,
+ * Sleep, Get around, ...) so a single destination can genuinely support
+ * more than one piece of content — used by the Journal page.
  */
 export const wikivoyageClient = {
   name: "Wikivoyage (MediaWiki Action API) — no key required",
   configured: true,
   async getDestinationGuide(location?: string) {
-    if (!location) return { live: false, title: null as string | null, extract: null as string | null, url: null as string | null };
+    const empty = {
+      live: false,
+      title: null as string | null,
+      extract: null as string | null,
+      url: null as string | null,
+      sections: [] as { heading: string; text: string }[],
+    };
+    if (!location) return empty;
     try {
-      const url = `https://en.wikivoyage.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(location)}`;
+      const url = `https://en.wikivoyage.org/w/api.php?action=query&format=json&prop=extracts&explaintext=1&redirects=1&titles=${encodeURIComponent(location)}`;
       const res = await fetch(url, { headers: { "User-Agent": "ButlerOS/1.0 (contact: troy.evans@outlook.com)" } });
       if (!res.ok) throw new Error(`Wikivoyage API returned ${res.status}`);
       const data: any = await res.json();
       const pages = data.query?.pages ?? {};
       const page: any = Object.values(pages)[0];
-      if (!page || "missing" in page || !page.extract) {
-        return { live: false, title: null as string | null, extract: null as string | null, url: null as string | null };
-      }
+      if (!page || "missing" in page || !page.extract) return empty;
       const title = page.title as string;
+      const { intro, sections } = splitWikivoyageArticle(page.extract as string);
       return {
         live: true,
         title,
-        extract: (page.extract as string).slice(0, 800),
+        extract: (intro || (page.extract as string)).slice(0, 800),
         url: `https://en.wikivoyage.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
+        sections,
       };
     } catch (err) {
       logFailure("Wikivoyage", err);
-      return { live: false, title: null as string | null, extract: null as string | null, url: null as string | null };
+      return empty;
     }
   },
 };
