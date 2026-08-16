@@ -86,6 +86,7 @@ export interface DestinationGuide {
   title: string | null;
   extract: string | null;
   url: string | null;
+  sections: { heading: string; text: string }[];
 }
 
 /**
