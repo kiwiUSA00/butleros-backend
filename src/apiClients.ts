@@ -189,14 +189,23 @@ export const googlePlacesClient = {
         pageSize: 20,
         textQuery: `${params.query ?? "things to do"} in ${params.location ?? ""}`,
       };
-      // Real coordinates (from the visitor's own IP geolocation) bias and
-      // re-rank results by actual distance instead of just matching the
-      // city name — genuinely "close to me" instead of "somewhere in this
-      // city." Only applied when the caller has real coords for exactly
-      // where the visitor is (never fabricated/estimated).
+      // Real coordinates (from the visitor's own IP/GPS geolocation) bias
+      // results toward wherever they actually are, instead of just
+      // matching the city name — genuinely "close to me" rather than
+      // "somewhere in this city." Only applied when the caller has real
+      // coords for exactly where the visitor is (never fabricated).
+      //
+      // Deliberately NOT setting rankPreference:"DISTANCE" here — that
+      // forces Google to sort purely by raw proximity, which throws away
+      // rating/popularity/relevance entirely and can easily surface a
+      // mediocre place that's 200ft closer over a genuinely great one a
+      // few blocks away. locationBias alone still nudges results toward
+      // this radius while keeping Google's default RELEVANCE ranking
+      // (rating + prominence + text match), which is what "good AND
+      // nearby" actually requires. A tighter 6km radius also keeps
+      // "close to me" feeling local rather than metro-wide.
       if (typeof params.lat === "number" && typeof params.lon === "number") {
-        body.locationBias = { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: 15000 } };
-        body.rankPreference = "DISTANCE";
+        body.locationBias = { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: 6000 } };
       }
       if (params.pageToken) body.pageToken = params.pageToken;
       const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
