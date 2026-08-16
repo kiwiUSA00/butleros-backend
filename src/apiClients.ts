@@ -852,13 +852,68 @@ export const appleCaldavClient = {
   },
 };
 
+export interface EventbriteEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  start: string | null;
+  end: string | null;
+  venueName: string | null;
+  address: string | null;
+  url: string | null;
+  imageUrl: string | null;
+  status: string | null;
+}
+
 export const eventbriteClient = {
   name: "Eventbrite API",
   configured: hasKeys(config.calendar.eventbriteKey),
-  async findEvents(params: { location?: string; date?: string }) {
-    warnIfUnconfigured("Eventbrite", config.calendar.eventbriteKey);
-    // Public event search was retired Feb 2020 — org-scoped only without a distribution-partner agreement.
-    return { live: false, events: [] as { id: string; title: string; date: string }[] };
+  /**
+   * Eventbrite retired public event search in Feb 2020 — without a
+   * distribution-partner agreement, the API only ever returns events that
+   * belong to the *connected* Eventbrite account's own organization(s), via
+   * a private token (Account settings -> Developer links -> API keys),
+   * which acts as a static Bearer token — no OAuth redirect flow needed for
+   * this personal, server-side use. That's an honest, real, org-scoped
+   * "your events" feed, not a general "things happening nearby" discovery
+   * feature — Ticketmaster (already wired below) covers that instead.
+   */
+  async findEvents(_params: { location?: string; date?: string } = {}): Promise<{ live: boolean; events: EventbriteEvent[] }> {
+    if (!this.configured) {
+      warnIfUnconfigured("Eventbrite", config.calendar.eventbriteKey);
+      return { live: false, events: [] };
+    }
+    try {
+      const token = config.calendar.eventbriteKey as string;
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const orgsRes = await fetch("https://www.eventbriteapi.com/v3/users/me/organizations/", { headers });
+      if (!orgsRes.ok) throw new Error(`Eventbrite orgs API returned ${orgsRes.status}`);
+      const orgsData: any = await orgsRes.json();
+      const orgId = orgsData?.organizations?.[0]?.id;
+      if (!orgId) return { live: true, events: [] }; // real call succeeded, account just has no organization
+
+      const eventsUrl = `https://www.eventbriteapi.com/v3/organizations/${orgId}/events/?order_by=start_asc&expand=venue,logo&status=live,started,ended`;
+      const eventsRes = await fetch(eventsUrl, { headers });
+      if (!eventsRes.ok) throw new Error(`Eventbrite events API returned ${eventsRes.status}`);
+      const eventsData: any = await eventsRes.json();
+      const items: EventbriteEvent[] = (eventsData?.events || []).map((e: any) => ({
+        id: e.id,
+        title: e.name?.text || "Untitled event",
+        description: e.summary || e.description?.text || null,
+        start: e.start?.local || null,
+        end: e.end?.local || null,
+        venueName: e.venue?.name || null,
+        address: e.venue?.address?.localized_address_display || null,
+        url: e.url || null,
+        imageUrl: e.logo?.original?.url || e.logo?.url || null,
+        status: e.status || null,
+      }));
+      return { live: true, events: items };
+    } catch (err) {
+      logFailure("Eventbrite", err);
+      return { live: false, events: [] };
+    }
   },
 };
 
