@@ -31,15 +31,23 @@ export async function curateExperiences(params: CurateExperiencesParams): Promis
 
   const cards: ExperienceCard[] = travelExperiences
     .filter((exp) => exp.live)
-    .map((exp) => ({
-      id: uuid(),
-      title: exp.title,
-      description: `A ${params.mood ?? "curated"} experience in ${exp.location}, matched to your budget.`,
-      priceBand: priceBandFor(exp.price),
-      location: exp.location,
-      bookingOptions: [{ provider: exp.provider, url: exp.url ?? "" }],
-      live: true,
-    }));
+    .map((exp) => {
+      const e = exp as any;
+      return {
+        id: uuid(),
+        title: exp.title,
+        // Prefer a real editorial description (Google Places) over the generic line.
+        description: e.description || `A ${params.mood ?? "curated"} experience in ${exp.location}, matched to your budget.`,
+        priceBand: priceBandFor(exp.price),
+        location: exp.location,
+        bookingOptions: [{ provider: exp.provider, url: exp.url ?? "" }],
+        live: true,
+        photoName: e.photoName as string | undefined,
+        rating: e.rating as number | undefined,
+        userRatingCount: e.userRatingCount as number | undefined,
+        address: e.address as string | undefined,
+      };
+    });
 
   // Fold in a "gear up" card using a related product, if a live one was found.
   const product = relatedProducts.find((p) => p.live && p.affiliateLink);
@@ -52,6 +60,7 @@ export async function curateExperiences(params: CurateExperiencesParams): Promis
       location: params.location ?? "Unknown",
       bookingOptions: [{ provider: product.retailer, url: product.affiliateLink as string }],
       live: true,
+      imageUrl: product.imageUrl,
     });
   }
 
